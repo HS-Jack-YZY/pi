@@ -174,3 +174,16 @@ All fields are optional with sensible defaults. The `model` field accepts any pr
 Set `"enabled": false` to disable background dreaming.
 
 Dreaming is opportunistic: it runs while a Pi host is active and catches up on the next session start. It does not run while every Pi host is closed.
+
+## Structured results (Pi 0.99+)
+
+`memory_read`, `memory_add`, `memory_replace`, and `memory_remove` declare `outputSchema` and return their live store results as `structuredContent`. Codemode receives entries and usage directly; writes also expose `success`, `target`, and `entryCount`. Failed writes set `isError: true` and preserve available `error`, `matches`, `currentEntries`, `usage`, and drift-remediation fields. Entry text remains the existing substring reference used by replace/remove; no new entry-ID format is introduced.
+
+```javascript
+const result = await tools.memory_read({ target: "memory" });
+if (result.error || result.truncated) throw new Error("Read a complete memory result before updating");
+const entry = result.entries.find(e => e.includes("TypeScript"));
+if (entry) text(await tools.memory_replace({ target: "memory", oldText: entry, newContent: "Project uses strict TypeScript" }));
+```
+
+Structured output is limited to 12 KiB and top-level lists to 100 complete records. `truncated: true` indicates omitted records; `total` retains the original count where available. Oversized records with an `id` retain that complete ID and small scalar metadata, omit large fields, and carry `truncated: true` both on the record and envelope; callers must check that flag before reusing content for an update. Oversized results without a record ID return a typed output-limit error instead of clipped paths or content. A write may already have completed when that happens: inspect saved state before retrying. Readable text and renderer details are independently bounded.

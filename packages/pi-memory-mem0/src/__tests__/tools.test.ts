@@ -1,3 +1,4 @@
+import { Value } from 'typebox/value';
 import { describe, expect, it, vi } from 'vitest';
 import type { Mem0Provider } from '../provider.js';
 import { createMem0MemoryTool } from '../tools.js';
@@ -31,13 +32,54 @@ async function execute(
   tool: ReturnType<typeof createTool>,
   params: Record<string, unknown>,
 ): Promise<ToolResult> {
-  return (await tool.execute('call-1', params, undefined, undefined, {} as never)) as ToolResult;
+  const result = await tool.execute('call-1', params, undefined, undefined, {} as never);
+  expect(Value.Check(tool.outputSchema!, result.structuredContent)).toBe(true);
+  return result as ToolResult;
 }
 
 describe('mem0_memory tool', () => {
+  it('exposes bounded redacted records with stable IDs and typed errors', async () => {
+    const tool = createTool(
+      mockProvider({
+        getAll: vi.fn().mockResolvedValue([{ id: 'm1', memory: 'uses TypeScript', score: 0.9 }]),
+      }),
+    );
+    expect(tool.outputSchema).toBeDefined();
+    const result = await tool.execute(
+      'list',
+      { action: 'get_all' },
+      undefined,
+      undefined,
+      {} as never,
+    );
+    expect(result.structuredContent).toHaveProperty('memories.0.id', 'm1');
+    expect(result.structuredContent).toHaveProperty('memories.0.memory', 'uses TypeScript');
+    const failed = await tool.execute(
+      'bad',
+      { action: 'delete' },
+      undefined,
+      undefined,
+      {} as never,
+    );
+    expect(failed.structuredContent).toHaveProperty('error');
+  });
+
   it('exposes a single tool named mem0_memory', () => {
     const tool = createTool(mockProvider());
     expect(tool.name).toBe('mem0_memory');
+  });
+
+  it('does not leak raw provider diagnostics into either output channel', async () => {
+    const result = await execute(
+      createTool(
+        mockProvider({
+          search: vi.fn().mockRejectedValue(new Error('token=secret-provider-value')),
+        }),
+      ),
+      { action: 'search', query: 'pets' },
+    );
+    expect(JSON.stringify(result)).not.toContain('secret-provider-value');
+    expect(result.isError).toBe(true);
   });
 
   it('returns isError when the provider is no longer active', async () => {

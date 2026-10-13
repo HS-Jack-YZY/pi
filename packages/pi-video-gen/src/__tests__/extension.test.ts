@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Value } from 'typebox/value';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import piVideoGenExtension from '../index.js';
 
@@ -15,12 +16,14 @@ const suiteDir = join(tmpdir(), 'pi-video-gen-extension');
 
 type ToolDef = {
   name: string;
+  outputSchema?: unknown;
   parameters: { properties?: Record<string, unknown>; required?: string[] };
   promptGuidelines?: string[];
   execute: (...args: unknown[]) => Promise<{
     isError?: true;
     content: { type: string; text: string }[];
     details?: Record<string, unknown>;
+    structuredContent?: Record<string, unknown>;
   }>;
 };
 
@@ -92,6 +95,24 @@ describe('pi-video-gen extension', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     rmSync(suiteDir, { recursive: true, force: true });
+  });
+
+  it('declares typed capabilities and safe errors for every public video tool', async () => {
+    for (const tool of tools.values()) expect(tool.outputSchema).toBeDefined();
+    const capabilities = await tools.get('video_capabilities')!.execute();
+    expect(
+      Value.Check(
+        tools.get('video_capabilities')!.outputSchema as never,
+        capabilities.structuredContent,
+      ),
+    ).toBe(true);
+    expect(capabilities.structuredContent).toHaveProperty('activeId', 'doubao-seedance-2-0-260128');
+    expect(capabilities.structuredContent).toHaveProperty('capabilities.nativeAudio', true);
+    const failed = await tools
+      .get('video_compose')!
+      .execute('bad', { composeSpecPath: 'absent.json' }, undefined, undefined, fakeCtx(cwd));
+    expect(failed.isError).toBe(true);
+    expect(failed.structuredContent).toHaveProperty('error');
   });
 
   it('registers tools, command, and lifecycle handlers', () => {
@@ -221,6 +242,8 @@ describe('pi-video-gen extension', () => {
         readFileSync(join(cwd, '.video-gen', 'single', jobId, 'manifest.json'), 'utf-8'),
       );
       expect(manifest.state).toBe('ambiguous');
+      expect(first.structuredContent).toHaveProperty('state', 'ambiguous');
+      expect(first.structuredContent).toHaveProperty('jobId', jobId);
       const input = JSON.parse(
         readFileSync(join(cwd, '.video-gen', 'single', jobId, 'input.json'), 'utf-8'),
       );
@@ -231,6 +254,10 @@ describe('pi-video-gen extension', () => {
         .execute('c2', { ...VALID_GENERATE_PARAMS, jobId }, undefined, undefined, fakeCtx(cwd));
       expect(resumed.isError).toBe(true);
       expect(resumed.content[0]!.text).toMatch(/ambiguous|MAY exist/i);
+      expect(resumed.structuredContent).toHaveProperty('state', 'ambiguous');
+      expect(
+        Value.Check(tools.get('video_generate')!.outputSchema as never, resumed.structuredContent),
+      ).toBe(true);
       expect(submits).toBe(1);
     } finally {
       vi.unstubAllGlobals();
@@ -1067,6 +1094,8 @@ describe('pi-video-gen extension', () => {
         .execute('c2', { ...VALID_GENERATE_PARAMS, jobId }, undefined, undefined, fakeCtx(cwd));
       expect(resume.isError).toBe(true);
       expect(resume.content[0]!.text).toMatch(/no longer trustworthy/);
+      expect(resume.structuredContent).toHaveProperty('state');
+      expect(resume.structuredContent).toHaveProperty('taskId', 'task-1');
     } finally {
       vi.unstubAllGlobals();
     }
@@ -1163,6 +1192,11 @@ describe('pi-video-gen extension', () => {
         .execute('c1', { ...VALID_GENERATE_PARAMS, jobId }, undefined, undefined, fakeCtx(cwd));
       expect(result.isError).toBeUndefined();
       expect(result.content[0]!.text).toContain('already rendered');
+      expect(result.structuredContent).toHaveProperty('state', 'done');
+      expect(result.structuredContent).toHaveProperty('qcStatus', 'not_performed');
+      expect(
+        Value.Check(tools.get('video_generate')!.outputSchema as never, result.structuredContent),
+      ).toBe(true);
     } finally {
       vi.unstubAllGlobals();
     }

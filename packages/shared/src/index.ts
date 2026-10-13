@@ -501,3 +501,5 @@ export {
   type TrustedHosts,
   trustedHostsFromUrls,
 } from './network.js';
+
+export { boundStructuredContent } from './tool-output.js';

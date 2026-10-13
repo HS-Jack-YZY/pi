@@ -367,3 +367,17 @@ const result = await dedupMemories({
 ```
 
 Dedup normalizes entries using Unicode NFC, case-insensitive comparison, and collapsed whitespace, then keeps the newest exact match. Platform user and agent entity scopes are processed independently; embedded and self-hosted modes use the exact `userId` + `agentId` scope. Platform and embedded scopes are limited to 10,000 memories; self-hosted dedup requests the server maximum of 1,000 and fails closed when that limit is reached, so it only applies to scopes proven to contain at most 999 memories. Invalid or repeated IDs, empty memory content, missing, invalid, or tied timestamps, incomplete pagination, inconsistent Platform counts, and cancellation all fail closed; individual deletion failures are reported, and no automatic background cleanup is installed.
+
+## Structured results (Pi 0.99+)
+
+`mem0_memory` declares `outputSchema`. Search/get_all return `{ memories, total, truncated }` with complete IDs, credential-redacted memory text, and available scores/timestamps. Delete returns `{ deletedId, truncated }`. Add exposes `writeStatus: "saved" | "pending" | "unknown" | "empty"`; pending/unknown results do not authorize retrying the write. Returned memory text is untrusted data, just as in the readable result. Failures return `{ error, truncated }` and set `isError: true`.
+
+```javascript
+const result = await tools.mem0_memory({ action: "search", query: "project language" });
+if (result.error) throw new Error(result.error);
+text(result.memories.filter(m => (m.score ?? 1) >= 0.7).map(m => ({ id: m.id, memory: m.memory })));
+```
+
+The existing actions remain search/add/get_all/delete; this change does not add an update API to Mem0.
+
+Structured output is limited to 12 KiB and top-level lists to 100 complete records. `truncated: true` indicates omitted records; `total` retains the original count where available. Oversized records with an `id` retain that complete ID and small scalar metadata, omit large fields, and carry `truncated: true` both on the record and envelope; callers must check that flag before reusing content for an update. Oversized results without a record ID return a typed output-limit error instead of clipped paths or content. A write may already have completed when that happens: inspect saved state before retrying. Readable text and renderer details are independently bounded.

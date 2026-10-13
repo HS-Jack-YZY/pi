@@ -1,3 +1,4 @@
+import { boundStructuredContent } from '@amaster.ai/pi-shared';
 import type {
   AgentToolResult,
   AgentToolUpdateCallback,
@@ -12,14 +13,38 @@ const targetSchema = Type.Union([Type.Literal('memory'), Type.Literal('user')], 
   description: "Which memory store: 'memory' (your notes) or 'user' (user profile).",
 });
 
-function textResult(text: string): AgentToolResult<unknown> {
-  return { content: [{ type: 'text' as const, text }], details: undefined };
-}
+const memoryOutputSchema = Type.Union([
+  Type.Object({
+    entries: Type.Array(Type.String()),
+    usage: Type.String(),
+    success: Type.Optional(Type.Boolean()),
+    target: Type.Optional(targetSchema),
+    entryCount: Type.Optional(Type.Integer()),
+    message: Type.Optional(Type.String()),
+    truncated: Type.Boolean(),
+  }),
+  Type.Object({
+    success: Type.Optional(Type.Literal(false)),
+    error: Type.String(),
+    matches: Type.Optional(Type.Array(Type.String())),
+    currentEntries: Type.Optional(Type.Array(Type.String())),
+    usage: Type.Optional(Type.String()),
+    driftBackup: Type.Optional(Type.String()),
+    remediation: Type.Optional(Type.String()),
+    truncated: Type.Boolean(),
+  }),
+]);
 
 function jsonResult(
   value: MemoryResult | { entries: string[]; usage: string },
 ): AgentToolResult<unknown> {
-  return textResult(JSON.stringify(value, null, 2));
+  const data = boundStructuredContent(value);
+  return {
+    content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+    details: data,
+    structuredContent: data,
+    ...('error' in data ? { isError: true } : {}),
+  };
 }
 
 function asTarget(raw: unknown): MemoryTarget {
@@ -39,6 +64,7 @@ export function createMemoryTools(store: MemoryStore): ToolDefinition[] {
       'After a successful write, call memory_read for this target to verify the saved state before reporting completion.',
     promptSnippet: 'Append durable facts to MEMORY.md or USER.md.',
     promptGuidelines: [MEMORY_GUIDANCE],
+    outputSchema: memoryOutputSchema,
     parameters: Type.Object({
       target: targetSchema,
       content: Type.String({ description: 'The entry content to append.' }),
@@ -68,6 +94,7 @@ export function createMemoryTools(store: MemoryStore): ToolDefinition[] {
       'Replacement also obeys the reported capacity. On failure, keep the original and inspect the error before a corrected retry. ' +
       'After a successful replacement, call memory_read for this target to verify the new entry and preserved facts before reporting completion or removing entries it subsumes.',
     promptSnippet: 'Update an existing MEMORY.md or USER.md entry.',
+    outputSchema: memoryOutputSchema,
     parameters: Type.Object({
       target: targetSchema,
       oldText: Type.String({
@@ -99,6 +126,7 @@ export function createMemoryTools(store: MemoryStore): ToolDefinition[] {
       'If the substring matches zero or multiple entries, read current entries and choose a unique match; preserve valid entries when capacity alone is the problem. ' +
       'After a successful removal, call memory_read for this target to verify the remaining entries before reporting completion.',
     promptSnippet: 'Delete an entry from MEMORY.md or USER.md.',
+    outputSchema: memoryOutputSchema,
     parameters: Type.Object({
       target: targetSchema,
       oldText: Type.String({
@@ -126,6 +154,7 @@ export function createMemoryTools(store: MemoryStore): ToolDefinition[] {
       'Its entries and usage describe the live target, including writes made since the prompt snapshot. ' +
       'Read both targets when reviewing or consolidating memory; use the reported capacity rather than assuming a fixed limit.',
     promptSnippet: 'Read the current contents of MEMORY.md or USER.md.',
+    outputSchema: memoryOutputSchema,
     parameters: Type.Object({
       target: targetSchema,
     }),

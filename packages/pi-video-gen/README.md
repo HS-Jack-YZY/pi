@@ -163,3 +163,25 @@ Remotion is installed by the local project rather than distributed with this pac
 Crash or cancel mid-render? Rerun the same spec path — generated-shot handles resume via `inspect` without re-billing, and local shots are checked against frozen content hashes. Completed jobs verify their final MP4 and QC hashes instead of recomposing. All-local jobs omit the model/provider from their fingerprint and need no API key. A legacy `done` render manifest without a saved final SHA-256 cannot verify its old film; create a new compose job from the saved clips. Cancelling stops local polling only; remote tasks may keep running and billable. If submit completion is ambiguous, use `/video-gen recover <jobId>` after checking the provider console.
 
 **Upgrading from the pre-structured format**: render jobs whose `render-input.json` still uses the old `videoPrompt` string can no longer be parsed or resumed (the structured `prompt` object replaced it deliberately, with no compatibility layer). If an in-flight paid task is stranded by the upgrade, download its clip manually from the provider console — task URLs expire (Ark: 24h). Single-clip jobs are unaffected: their frozen `input.json` is read, not re-parsed.
+
+## Structured results (Pi 0.99+)
+
+All four tools declare `outputSchema` and return bounded `structuredContent`; codemode receives the object directly. Generation returns `jobId`, `state`, `videoPath`, and available `taskId`/`bytes`; composition/rendering return `jobId`, `state`, `finalVideoPath`, and their existing composition metadata. `video_capabilities` exposes `activeId`, `activeResolved`, `provider`, `keyReady`, `capabilities`, `models`, and `totalModels`, without provider credentials or URLs.
+
+`qcStatus: "recorded"` means the result includes existing QC frame/report paths. It does not mean a human or visual inspection passed. `qcStatus: "not_performed"` covers single clips, concat, Remotion composition, or historical jobs without recorded QC. Available `qcFrames`, `qcReportPath`, `subtitlePath`, and editable project paths are returned directly. Failures return `{ error, truncated }` with `isError: true` and available persisted `jobId`/`state`/`taskId` or render-shot states. An ambiguous or interrupted paid job must be inspected/resumed rather than submitted again.
+
+```javascript
+const image = await tools.image_generate({ prompt: "A blue product illustration" });
+if (image.error) throw new Error(image.error);
+await tools.write({ path: ".video-gen/demo/timeline-input.json", content: JSON.stringify({
+  output: { resolution: "640x360", fps: 25 },
+  segments: [{ id: "s1", image: image.images[0].path, durationSec: 1, motion: "static" }]
+}) });
+const video = await tools.video_compose({ composeSpecPath: ".video-gen/demo/timeline-input.json" });
+if (video.error) throw new Error(video.error);
+text({ path: video.finalVideoPath, qcStatus: video.qcStatus, frames: video.qcFrames });
+```
+
+The example's image call requires the normal image-provider configuration and authorization. `tests/structured-workflows.test.ts` exercises the same chain in real Pi codemode (`on` and `only`) with a fixed image-provider fixture and real local FFmpeg rendering, without paid/network generation.
+
+Structured output is limited to 12 KiB and top-level lists to 100 complete records. `truncated: true` indicates omitted records; `total` retains the original count where available. Oversized records with an `id` retain that complete ID and small scalar metadata, omit large fields, and carry `truncated: true` both on the record and envelope; callers must check that flag before reusing content for an update. Oversized results without a record ID return a typed output-limit error instead of clipped paths or content. A write may already have completed when that happens: inspect saved state before retrying. Readable text and renderer details are independently bounded.

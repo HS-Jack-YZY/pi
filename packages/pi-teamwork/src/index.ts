@@ -1,5 +1,6 @@
+import { boundStructuredContent } from '@amaster.ai/pi-shared';
 import { isProjectTrusted, loadPiSettings } from '@amaster.ai/pi-shared/settings';
-import { defineTool, type ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { defineTool, type ExtensionAPI, truncateHead } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { initMulticaProvider } from './adapters/multica.js';
 import type { ExecFn, TeamworkConfig, TeamworkProvider } from './types.js';
@@ -38,6 +39,58 @@ const WORKSPACE_ID_PARAM = Type.Optional(
       'Workspace ID from workspace_list. Optional when the account has exactly one workspace.',
   }),
 );
+
+const errorSchema = Type.Object({ error: Type.String(), truncated: Type.Boolean() });
+const issueSchema = Type.Union([
+  Type.Object({
+    id: Type.String(),
+    truncated: Type.Optional(Type.Literal(false)),
+    title: Type.String(),
+    status: Type.String(),
+    description: Type.Optional(Type.String()),
+    priority: Type.Optional(Type.String()),
+    assignee: Type.Optional(Type.String()),
+    project: Type.Optional(Type.String()),
+    createdAt: Type.Optional(Type.String()),
+    updatedAt: Type.Optional(Type.String()),
+  }),
+  Type.Object({ id: Type.String(), truncated: Type.Literal(true) }),
+]);
+const commentSchema = Type.Union([
+  Type.Object({
+    id: Type.String(),
+    truncated: Type.Optional(Type.Literal(false)),
+    issueId: Type.String(),
+    content: Type.String(),
+    author: Type.Optional(Type.String()),
+    createdAt: Type.Optional(Type.String()),
+    parentId: Type.Optional(Type.String()),
+  }),
+  Type.Object({ id: Type.String(), truncated: Type.Literal(true) }),
+]);
+const projectSchema = Type.Union([
+  Type.Object({
+    id: Type.String(),
+    truncated: Type.Optional(Type.Literal(false)),
+    title: Type.String(),
+    description: Type.Optional(Type.String()),
+    status: Type.Optional(Type.String()),
+    lead: Type.Optional(Type.String()),
+  }),
+  Type.Object({ id: Type.String(), truncated: Type.Literal(true) }),
+]);
+const workspaceSchema = Type.Union([
+  Type.Object({
+    id: Type.String(),
+    truncated: Type.Optional(Type.Literal(false)),
+    name: Type.String(),
+  }),
+  Type.Object({ id: Type.String(), truncated: Type.Literal(true) }),
+]);
+const issueOutputSchema = Type.Union([
+  Type.Object({ issue: issueSchema, truncated: Type.Boolean() }),
+  errorSchema,
+]);
 
 export default function piTeamworkExtension(pi: ExtensionAPI): void {
   let provider: TeamworkProvider | undefined;
@@ -179,16 +232,27 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       label: 'Teamwork',
       description: 'List all workspaces you belong to. Use this to discover or switch workspaces.',
       promptSnippet: 'List workspaces in the shared project tracker.',
+      outputSchema: Type.Union([
+        Type.Object({
+          workspaces: Type.Array(workspaceSchema),
+          total: Type.Integer(),
+          truncated: Type.Boolean(),
+        }),
+        errorSchema,
+      ]),
       parameters: Type.Object({}),
       async execute() {
         const err = await ensureReady();
-        if (err) return textResult(err);
+        if (err) return errorResult(err);
         try {
           const workspaces = await getProvider().listWorkspaces();
-          if (workspaces.length === 0) return textResult('No workspaces found.');
-          return textResult(JSON.stringify(workspaces, null, 2));
-        } catch (error) {
-          return textResult(`Error: ${error instanceof Error ? error.message : String(error)}`);
+
+          return textResult(
+            { workspaces: workspaces, total: workspaces.length },
+            workspaces.length ? undefined : 'No workspaces found.',
+          );
+        } catch {
+          return providerErrorResult();
         }
       },
     }),
@@ -200,6 +264,14 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
         'List issues from a shared project tracker. Issues are work items that humans or other agents collaborate on. Supports filtering by status, assignee, and project.',
       promptSnippet:
         'List issues from a shared project tracker where humans and agents collaborate.',
+      outputSchema: Type.Union([
+        Type.Object({
+          issues: Type.Array(issueSchema),
+          total: Type.Integer(),
+          truncated: Type.Boolean(),
+        }),
+        errorSchema,
+      ]),
       parameters: Type.Object({
         workspaceId: WORKSPACE_ID_PARAM,
         status: Type.Optional(
@@ -211,13 +283,19 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       }),
       async execute(_toolCallId, params) {
         const err = await ensureReady();
-        if (err) return textResult(err);
+        if (err) return errorResult(err);
         try {
           const issues = await getProvider().listIssues(params);
-          if (issues.length === 0) return textResult('No issues found.');
-          return textResult(JSON.stringify(issues, null, 2));
-        } catch (error) {
-          return textResult(`Error: ${error instanceof Error ? error.message : String(error)}`);
+
+          return textResult(
+            {
+              issues: issues.map(({ metadata: _metadata, ...issue }) => issue),
+              total: issues.length,
+            },
+            issues.length ? undefined : 'No issues found.',
+          );
+        } catch {
+          return providerErrorResult();
         }
       },
     }),
@@ -227,19 +305,21 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       label: 'Teamwork',
       description:
         'Get detailed information about a specific issue (a work item in the shared project tracker).',
+      outputSchema: issueOutputSchema,
       parameters: Type.Object({
         workspaceId: WORKSPACE_ID_PARAM,
         id: Type.String({ description: 'The issue ID.' }),
       }),
       async execute(_toolCallId, params) {
         const err = await ensureReady();
-        if (err) return textResult(err);
+        if (err) return errorResult(err);
         try {
           const issue = await getProvider().getIssue(params.id, params.workspaceId);
-          if (!issue) return textResult(`Issue not found: ${params.id}`);
-          return textResult(JSON.stringify(issue, null, 2));
-        } catch (error) {
-          return textResult(`Error: ${error instanceof Error ? error.message : String(error)}`);
+          if (!issue) return errorResult(`Issue not found: ${params.id}`);
+          const { metadata: _metadata, ...record } = issue;
+          return textResult({ issue: record });
+        } catch {
+          return providerErrorResult();
         }
       },
     }),
@@ -251,6 +331,7 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
         'Create a new issue (a work item / ticket) in the shared project tracker. Use this to file work for humans or other agents to pick up.',
       promptSnippet:
         'Create issues / tickets in a shared project tracker for humans or agents to collaborate on.',
+      outputSchema: issueOutputSchema,
       parameters: Type.Object({
         workspaceId: WORKSPACE_ID_PARAM,
         title: Type.String({ description: 'Issue title.' }),
@@ -263,12 +344,13 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       }),
       async execute(_toolCallId, params) {
         const err = await ensureReady();
-        if (err) return textResult(err);
+        if (err) return errorResult(err);
         try {
           const issue = await getProvider().createIssue(params);
-          return textResult(JSON.stringify(issue, null, 2));
-        } catch (error) {
-          return textResult(`Error: ${error instanceof Error ? error.message : String(error)}`);
+          const { metadata: _metadata, ...record } = issue;
+          return textResult({ issue: record });
+        } catch {
+          return providerErrorResult();
         }
       },
     }),
@@ -278,6 +360,7 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       label: 'Teamwork',
       description:
         'Update an existing issue in the shared project tracker. Can change title, description, status, priority, or assignee.',
+      outputSchema: issueOutputSchema,
       parameters: Type.Object({
         workspaceId: WORKSPACE_ID_PARAM,
         id: Type.String({ description: 'The issue ID to update.' }),
@@ -294,14 +377,15 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       }),
       async execute(_toolCallId, params) {
         const err = await ensureReady();
-        if (err) return textResult(err);
+        if (err) return errorResult(err);
         const { id, workspaceId, ...input } = params;
         try {
           const issue = await getProvider().updateIssue(id, input, workspaceId);
-          if (!issue) return textResult(`Issue not found: ${id}`);
-          return textResult(JSON.stringify(issue, null, 2));
-        } catch (error) {
-          return textResult(`Error: ${error instanceof Error ? error.message : String(error)}`);
+          if (!issue) return errorResult(`Issue not found: ${id}`);
+          const { metadata: _metadata, ...record } = issue;
+          return textResult({ issue: record });
+        } catch {
+          return providerErrorResult();
         }
       },
     }),
@@ -311,6 +395,10 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       label: 'Teamwork',
       description:
         'Add a comment to an issue in the shared project tracker. Use for progress updates, questions, or blockers visible to other collaborators (humans or agents).',
+      outputSchema: Type.Union([
+        Type.Object({ comment: commentSchema, truncated: Type.Boolean() }),
+        errorSchema,
+      ]),
       parameters: Type.Object({
         workspaceId: WORKSPACE_ID_PARAM,
         issueId: Type.String({ description: 'The issue ID to comment on.' }),
@@ -321,7 +409,7 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       }),
       async execute(_toolCallId, params) {
         const err = await ensureReady();
-        if (err) return textResult(err);
+        if (err) return errorResult(err);
         try {
           const comment = await getProvider().addComment(
             params.issueId,
@@ -329,9 +417,9 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
             params.parentId,
             params.workspaceId,
           );
-          return textResult(JSON.stringify(comment, null, 2));
-        } catch (error) {
-          return textResult(`Error: ${error instanceof Error ? error.message : String(error)}`);
+          return textResult({ comment });
+        } catch {
+          return providerErrorResult();
         }
       },
     }),
@@ -340,18 +428,29 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       name: 'project_list',
       label: 'Teamwork',
       description: 'List all projects in a workspace.',
+      outputSchema: Type.Union([
+        Type.Object({
+          projects: Type.Array(projectSchema),
+          total: Type.Integer(),
+          truncated: Type.Boolean(),
+        }),
+        errorSchema,
+      ]),
       parameters: Type.Object({
         workspaceId: WORKSPACE_ID_PARAM,
       }),
       async execute(_toolCallId, params) {
         const err = await ensureReady();
-        if (err) return textResult(err);
+        if (err) return errorResult(err);
         try {
           const projects = await getProvider().listProjects(params.workspaceId);
-          if (projects.length === 0) return textResult('No projects found.');
-          return textResult(JSON.stringify(projects, null, 2));
-        } catch (error) {
-          return textResult(`Error: ${error instanceof Error ? error.message : String(error)}`);
+
+          return textResult(
+            { projects: projects, total: projects.length },
+            projects.length ? undefined : 'No projects found.',
+          );
+        } catch {
+          return providerErrorResult();
         }
       },
     }),
@@ -361,15 +460,34 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       label: 'Teamwork',
       description:
         'Check the status of the teamwork collaboration provider (daemon status, connected agents, etc.).',
+      outputSchema: Type.Union([
+        Type.Object({
+          provider: Type.String(),
+          status: Type.Object({
+            running: Type.Optional(Type.Boolean()),
+            pid: Type.Optional(Type.Number()),
+            status: Type.Optional(Type.String()),
+          }),
+          truncated: Type.Boolean(),
+        }),
+        errorSchema,
+      ]),
       parameters: Type.Object({}),
       async execute() {
         const err = await ensureReady();
-        if (err) return textResult(err);
+        if (err) return errorResult(err);
         try {
           const s = await getProvider().status();
-          return textResult(JSON.stringify(s, null, 2));
-        } catch (error) {
-          return textResult(`Error: ${error instanceof Error ? error.message : String(error)}`);
+          return textResult({
+            provider: getProvider().name,
+            status: {
+              ...(typeof s.running === 'boolean' ? { running: s.running } : {}),
+              ...(typeof s.pid === 'number' ? { pid: s.pid } : {}),
+              ...(typeof s.status === 'string' ? { status: s.status } : {}),
+            },
+          });
+        } catch {
+          return providerErrorResult();
         }
       },
     }),
@@ -410,8 +528,33 @@ function alignActiveTeamworkTools(
   }
 }
 
-function textResult(text: string) {
-  return { content: [{ type: 'text' as const, text }], details: undefined };
+function textResult(value: object, text?: string) {
+  const data = boundStructuredContent(value);
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: truncateHead(text ?? JSON.stringify(data, null, 2), {
+          maxBytes: 16 * 1024,
+          maxLines: 200,
+        }).content,
+      },
+    ],
+    details: data,
+    structuredContent: data,
+    ...('error' in data ? { isError: true } : {}),
+  };
+}
+
+function providerErrorResult() {
+  console.error('[pi-teamwork] provider operation failed');
+  return errorResult(
+    'Teamwork operation failed. Check provider status and inspect issue state before retrying.',
+  );
+}
+
+function errorResult(text: string) {
+  return textResult({ error: text }, text);
 }
 
 function loadConfig(cwd: string, projectTrusted = false): TeamworkConfig {

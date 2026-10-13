@@ -1,3 +1,4 @@
+import { boundStructuredContent } from '@amaster.ai/pi-shared';
 /**
  * Active memory tool — the LLM-callable interface over the Mem0 provider.
  *
@@ -50,20 +51,49 @@ export interface Mem0MemoryToolOptions {
   topK?: number;
 }
 
-/**
- * AgentToolResult has no isError field in this runtime — agent-core marks any
- * non-throwing execute() as success. Keep the flag anyway (documented extension
- * contract; a future runtime may honor it) via an intersection so the literals
- * typecheck.
- */
-type Mem0ToolResult = AgentToolResult<unknown> & { isError?: boolean };
+const mem0OutputSchema = Type.Union([
+  Type.Object({
+    memories: Type.Optional(
+      Type.Array(
+        Type.Union([
+          Type.Object({
+            id: Type.String(),
+            truncated: Type.Optional(Type.Literal(false)),
+            memory: Type.String(),
+            score: Type.Optional(Type.Number()),
+            created_at: Type.Optional(Type.String()),
+            updated_at: Type.Optional(Type.String()),
+          }),
+          Type.Object({ id: Type.String(), truncated: Type.Literal(true) }),
+        ]),
+      ),
+    ),
+    total: Type.Optional(Type.Integer()),
+    message: Type.Optional(Type.String()),
+    deletedId: Type.Optional(Type.String()),
+    writeStatus: Type.Optional(StringEnum(['saved', 'pending', 'unknown', 'empty'] as const)),
+    truncated: Type.Boolean(),
+  }),
+  Type.Object({ error: Type.String(), truncated: Type.Boolean() }),
+]);
 
-function textResult(text: string): Mem0ToolResult {
-  return { content: [{ type: 'text' as const, text }], details: undefined };
+function textResult(text: string, value: object = { message: text }): AgentToolResult<unknown> {
+  const data = boundStructuredContent(value);
+  return {
+    content: [
+      {
+        type: 'text',
+        text: truncateHead(text, { maxBytes: MAX_BLOCK_BYTES, maxLines: MAX_BLOCK_LINES }).content,
+      },
+    ],
+    details: data,
+    structuredContent: data,
+    ...('error' in data ? { isError: true } : {}),
+  };
 }
 
-function errorResult(text: string): Mem0ToolResult {
-  return { isError: true, content: [{ type: 'text' as const, text }], details: undefined };
+function errorResult(text: string): AgentToolResult<unknown> {
+  return { ...textResult(text, { error: text }), isError: true };
 }
 
 function formatEntry(entry: MemoryItem): string {
@@ -72,14 +102,29 @@ function formatEntry(entry: MemoryItem): string {
   return `- ${entry.id}${date ? ` (${date})` : ''}: ${formatRecalledMemory(text)}`;
 }
 
-function formatBlock(title: string, entries: MemoryItem[]): AgentToolResult<unknown> {
-  const lines = entries.filter((e) => e.memory?.trim()).map(formatEntry);
-  if (lines.length === 0) return textResult('No memories found.');
+function formatBlock(
+  title: string,
+  entries: MemoryItem[],
+  extra: object = {},
+): AgentToolResult<unknown> {
+  const memories = entries
+    .filter((e) => e.memory?.trim())
+    .map((e) => ({
+      id: e.id,
+      memory: redactMemoryText(e.memory),
+      ...(e.score !== undefined ? { score: e.score } : {}),
+      ...(e.created_at ? { created_at: e.created_at } : {}),
+      ...(e.updated_at ? { updated_at: e.updated_at } : {}),
+    }));
+  const data = boundStructuredContent({ memories, total: memories.length, ...extra });
+  if (typeof data.error === 'string') return textResult(data.error, data);
+  const visibleCount = Array.isArray(data.memories) ? data.memories.length : 0;
+  const lines = memories.slice(0, visibleCount).map(formatEntry);
   return textResult(
-    truncateHead(`${title}\n${lines.join('\n')}`, {
-      maxBytes: MAX_BLOCK_BYTES,
-      maxLines: MAX_BLOCK_LINES,
-    }).content,
+    lines.length
+      ? `${title}\n${lines.join('\n')}${data.truncated ? '\n[Memory results truncated]' : ''}`
+      : 'No memories found.',
+    data,
   );
 }
 
@@ -103,6 +148,7 @@ export function createMem0MemoryTool(opts: Mem0MemoryToolOptions): ToolDefinitio
       'Save durable facts proactively — user preferences, corrections, environment facts. Do not save task progress or temporary session state.',
       'An accepted add may still be processing in the background. Do not retry an accepted write just because search does not find it yet.',
     ],
+    outputSchema: mem0OutputSchema,
     parameters: Type.Object({
       action: StringEnum(['search', 'add', 'get_all', 'delete'] as const, {
         description: 'The memory operation to perform.',
@@ -153,9 +199,10 @@ export function createMem0MemoryTool(opts: Mem0MemoryToolOptions): ToolDefinitio
               ...scope,
               ...signalOpts,
             });
-            const { message, memories: created, isError } = getAddResult(result);
-            if (message) return isError ? errorResult(message) : textResult(message);
-            return formatBlock(`Saved ${created.length} memories:`, created);
+            const { message, memories: created, isError, writeStatus } = getAddResult(result);
+            if (message)
+              return isError ? errorResult(message) : textResult(message, { message, writeStatus });
+            return formatBlock(`Saved ${created.length} memories:`, created, { writeStatus });
           }
           case 'get_all': {
             const results = await provider.getAll({ ...scope, ...signalOpts });
@@ -165,7 +212,7 @@ export function createMem0MemoryTool(opts: Mem0MemoryToolOptions): ToolDefinitio
             const memoryId = String(params.memory_id ?? '').trim();
             if (!memoryId) return errorResult('memory_id is required for the delete action.');
             await provider.delete(memoryId, signalOpts);
-            return textResult(`Deleted memory ${memoryId}.`);
+            return textResult(`Deleted memory ${memoryId}.`, { deletedId: memoryId });
           }
           default:
             return errorResult(
@@ -173,9 +220,12 @@ export function createMem0MemoryTool(opts: Mem0MemoryToolOptions): ToolDefinitio
             );
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error(`[pi-memory-mem0] mem0_memory ${action} failed: ${message}`);
-        return errorResult(`mem0_memory ${action} failed: ${message}`);
+        const raw = err instanceof Error ? err.message : '';
+        const message = /^Mem0 request failed \(\d{3}\)\.$/.test(raw)
+          ? raw
+          : 'Mem0 operation failed. Inspect stored memories before retrying a write.';
+        console.error('[pi-memory-mem0] mem0_memory operation failed');
+        return errorResult(`mem0_memory operation failed: ${message}`);
       }
     },
   };

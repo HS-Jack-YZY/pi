@@ -136,3 +136,17 @@ The scheduler does not catch up missed runs after process downtime. When it star
 ## Hooks
 
 Hooks are best-effort observability callbacks. If a hook throws, the scheduler swallows the error and keeps task state authoritative.
+
+## Structured results (Pi 0.99+)
+
+Scheduler tools declare `outputSchema`. List returns `{ tasks, total, truncated }`; create/get/update/run_now return `{ task, truncated }`; delete returns `{ taskId, deleted, truncated }`. Structured task prompts are complete when the task record is not marked `truncated`, even when the readable summary shows only the first 100 characters. Oversized task records omit the prompt and preserve the task ID for updates/deletion. Get includes stored task metadata and run-history identifiers/status/timestamps, excluding raw execution error messages. Missing tasks, invalid schedules, and backend failures return `{ error, truncated }` with `isError: true`. The existing session scope applies equally to scripts.
+
+```javascript
+const result = await tools.scheduler_list({});
+if (result.error || result.truncated) throw new Error("Inspect the complete task list first");
+for (const task of result.tasks.filter(t => t.enabled && t.name === "Daily check")) {
+  text(await tools.scheduler_update({ taskId: task.id, enabled: false }));
+}
+```
+
+Structured output is limited to 12 KiB and top-level lists to 100 complete records. `truncated: true` indicates omitted records; `total` retains the original count where available. Oversized records with an `id` retain that complete ID and small scalar metadata, omit large fields, and carry `truncated: true` both on the record and envelope; callers must check that flag before reusing content for an update. Oversized results without a record ID return a typed output-limit error instead of clipped paths or content. A write may already have completed when that happens: inspect saved state before retrying. Readable text and renderer details are independently bounded.

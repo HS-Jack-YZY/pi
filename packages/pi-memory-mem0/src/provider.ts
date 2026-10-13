@@ -125,6 +125,7 @@ function normalizeResults(raw: unknown): MemoryItem[] {
 /** Preserve queued/unknown outcomes while accepting legacy synchronous result shapes. */
 export function getAddResult(raw: unknown): {
   memories: MemoryItem[];
+  writeStatus: 'saved' | 'pending' | 'unknown' | 'empty' | 'failed';
   message?: string;
   isError?: boolean;
 } {
@@ -137,22 +138,33 @@ export function getAddResult(raw: unknown): {
   const hasStatus = (status: string) =>
     responses.some((item) => item && typeof item === 'object' && item.status === status);
   if (hasStatus('FAILED')) {
-    return { memories: [], message: 'Mem0 memory write failed.', isError: true };
+    return {
+      memories: [],
+      writeStatus: 'failed',
+      message: 'Mem0 memory write failed.',
+      isError: true,
+    };
   }
   if (hasStatus('PENDING')) {
     return {
       memories: [],
+      writeStatus: 'pending' as const,
       message:
         'Memory write accepted and processing in the background. Memories may not be searchable yet; do not retry this write.',
     };
   }
   const unknown = {
     memories: [],
+    writeStatus: 'unknown' as const,
     message: 'Mem0 returned no extraction result. The write outcome is unknown.',
   };
   if (!entries) return unknown;
   if (entries.length === 0) {
-    return { memories: [], message: 'No memory was extracted from the provided content.' };
+    return {
+      memories: [],
+      writeStatus: 'empty',
+      message: 'No memory was extracted from the provided content.',
+    };
   }
   const memories: MemoryItem[] = [];
   for (const entry of entries) {
@@ -164,7 +176,7 @@ export function getAddResult(raw: unknown): {
     }
     memories.push(normalizeMemoryItem({ ...entry, memory }));
   }
-  return { memories };
+  return { memories, writeStatus: 'saved' };
 }
 
 function cancellationReason(signal: AbortSignal): Error {

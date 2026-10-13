@@ -108,3 +108,17 @@ src/
 ```
 
 The extension uses a provider pattern — `index.ts` registers tools that delegate to a `TeamworkProvider` interface. Adding a new provider (Linear, Jira, etc.) only requires implementing the interface and adding a factory branch in `session_start`.
+
+## Structured results (Pi 0.99+)
+
+Teamwork tools declare `outputSchema`: workspace_list/issue_list/project_list return `{ workspaces | issues | projects, total, truncated }`; issue_get/create/update return `{ issue, truncated }`; issue_comment returns `{ comment, truncated }`. Issue objects retain their existing IDs/statuses and public fields; arbitrary provider metadata is excluded. teamwork_status exposes the provider and available running/pid/status fields, excluding raw CLI output. Failures return `{ error, truncated }` with `isError: true`, without CLI diagnostics or credentials. Tracker writes still require user authorization.
+
+```javascript
+const result = await tools.issue_list({ status: "todo" });
+if (result.error) throw new Error(result.error);
+text(result.issues.map(issue => ({ id: issue.id, title: issue.title, status: issue.status })));
+// Once the user has authorized this issue's status update:
+// await tools.issue_update({ id: result.issues[0].id, status: "in_progress" });
+```
+
+Structured output is limited to 12 KiB and top-level lists to 100 complete records. `truncated: true` indicates omitted records; `total` retains the original count where available. Oversized records with an `id` retain that complete ID and small scalar metadata, omit large fields, and carry `truncated: true` both on the record and envelope; callers must check that flag before reusing content for an update. Oversized results without a record ID return a typed output-limit error instead of clipped paths or content. A write may already have completed when that happens: inspect saved state before retrying. Readable text and renderer details are independently bounded.

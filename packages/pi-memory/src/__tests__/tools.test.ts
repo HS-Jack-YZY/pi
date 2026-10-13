@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { Value } from 'typebox/value';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MemoryStore } from '../store.js';
 import { createMemoryTools } from '../tools.js';
@@ -23,11 +24,44 @@ async function runTool(
   const result = await tool.execute('call-1', params, undefined, undefined, {
     cwd: process.cwd(),
   } as unknown as Parameters<typeof tool.execute>[4]);
+  expect(Value.Check(tool.outputSchema!, result.structuredContent)).toBe(true);
   const text = (result.content[0] as { text: string }).text;
   return JSON.parse(text);
 }
 
 describe('createMemoryTools', () => {
+  it('returns declared objects for read, write and failure', async () => {
+    const store = freshStore();
+    await store.loadFromDisk();
+    const [add, replace, , read] = createMemoryTools(store);
+    for (const tool of createMemoryTools(store)) expect(tool.outputSchema).toBeDefined();
+    const saved = await add!.execute(
+      'add',
+      { target: 'memory', content: 'project uses TypeScript' },
+      undefined,
+      undefined,
+      {} as never,
+    );
+    expect(saved.structuredContent).toHaveProperty('entries', ['project uses TypeScript']);
+    const live = await read!.execute(
+      'read',
+      { target: 'memory' },
+      undefined,
+      undefined,
+      {} as never,
+    );
+    expect(live.structuredContent).toHaveProperty('entries', ['project uses TypeScript']);
+    const failed = await replace!.execute(
+      'replace',
+      { target: 'memory', oldText: 'missing', newContent: 'new' },
+      undefined,
+      undefined,
+      {} as never,
+    );
+    expect(failed.isError).toBe(true);
+    expect(failed.structuredContent).toHaveProperty('success', false);
+  });
+
   it('exposes 4 tools with the expected names', () => {
     const tools = createMemoryTools(freshStore());
     const guidance = tools.flatMap((tool) => tool.promptGuidelines ?? []).join('\n');

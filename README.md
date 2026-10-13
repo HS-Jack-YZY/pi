@@ -4,6 +4,8 @@
 
 Shared TypeScript packages for Pi runtime applications.
 
+On Pi 0.99+, video, teamwork, curated memory, Mem0, and scheduler tools expose bounded structured results for codemode scripts. Scripts can consume IDs, complete memory entries/task prompts, media paths, and available QC metadata directly; see the corresponding package READMEs for result contracts.
+
 This repository contains the open-source runtime contracts, adapters, and orchestration helpers that are consumed by Pi Agent and related applications. The packages are intentionally small and composable: host applications provide HTTP routing, authentication, model runtime setup, deployment configuration, and product-specific UI.
 
 ## Packages
