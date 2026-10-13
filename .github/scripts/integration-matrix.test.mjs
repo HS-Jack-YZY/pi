@@ -215,10 +215,12 @@ test('threads the integration model through generated configs and skill evaluati
       assert.equal(config.providers['deepseek-integration'].models[0].maxTokens, 131072);
     }
     const settings = configs.filter(([kind]) => kind === 'settings')[1][1];
+    const visionModels = configs.filter(([kind]) => kind === 'models')[1][1].providers['deepseek-integration'].models;
+    assert.deepEqual(visionModels.find((entry) => entry.id === 'deepseek-flash').input, ['text', 'image']);
     assert.equal(settings['pi-goal'].model.model, model);
     assert.equal(settings['pi-memory-mem0'].oss.llm.config.model, model);
     assert.equal(settings['pi-memory-mem0'].oss.embedder.config.model, 'text-embedding-v4');
-    assert.equal(settings['pi-browser-use'].visionModel.model, 'kimi-k2.6');
+    assert.equal(settings['pi-browser-use'].visionModel.model, 'deepseek-flash');
     // Non-redacted legs keep payloads on; the redacted scenario flips this to
     // false in the workflow before the heredoc runs.
     assert.equal(settings['pi-telemetry'].includePayloads, true);

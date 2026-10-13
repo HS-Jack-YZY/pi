@@ -449,7 +449,7 @@ jobs:
 
           # 1. models.json — the integration gateway custom provider used by
           #    every matrix entry. PI_INTEGRATION_MODEL selects the main model; the browser
-          #    vision tool uses Kimi K2.6 because DeepSeek cannot accept images.
+          #    vision tool uses deepseek-flash with image input explicitly declared.
           cat > "$PI_CODING_AGENT_DIR/models.json" <<EOF
           {
             "providers": {
@@ -480,12 +480,12 @@ jobs:
                     }
                   },
                   {
-                    "id": "kimi-k2.6",
-                    "name": "Kimi K2.6",
+                    "id": "deepseek-flash",
+                    "name": "DeepSeek Flash",
                     "reasoning": true,
                     "input": ["text", "image"],
-                    "contextWindow": 262144,
-                    "maxTokens": 262144,
+                    "contextWindow": 1000000,
+                    "maxTokens": 393216,
                     "compat": {
                       "supportsStore": false,
                       "supportsDeveloperRole": false,
@@ -593,7 +593,7 @@ jobs:
               "wsEndpoint": "wss://production-sfo.browserless.io/chrome?token=\${BROWSERLESS_TOKEN}",
               "visionModel": {
                 "provider": "deepseek-integration",
-                "model": "kimi-k2.6"
+                "model": "deepseek-flash"
               }
             },
             "pi-telemetry": {
@@ -1085,7 +1085,7 @@ jobs:
           fi
 
           # Screenshot scenario: browser_analyze_screenshot captures the image
-          # internally, sends it to the configured Kimi vision model, and returns
+          # internally, sends it to the configured DeepSeek vision model, and returns
           # text to the DeepSeek main model. Assert the vision tool itself found
           # both deterministic markers.
           if [ "${{ matrix.assert_visual_analysis }}" = "true" ]; then
