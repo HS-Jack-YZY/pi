@@ -20,13 +20,13 @@ export const imageOutputSchema = Type.Union([
 ]);
 
 function clipText(text: string, maxBytes: number, maxLines: number) {
-  const result = truncateHead(text, { maxBytes, maxLines });
-  return result.firstLineExceedsLimit
-    ? new TextDecoder('utf-8', { ignoreBOM: true }).decode(
-        Buffer.from(text).subarray(0, maxBytes),
-        { stream: true },
-      )
-    : result.content;
+  const lineLimited = truncateHead(text, { maxBytes: Number.MAX_SAFE_INTEGER, maxLines }).content;
+  const bytes = Buffer.from(lineLimited);
+  return bytes.length <= maxBytes
+    ? lineLimited
+    : new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes.subarray(0, maxBytes), {
+        stream: true,
+      });
 }
 
 export function imageOutput(result: ImageGenResult) {

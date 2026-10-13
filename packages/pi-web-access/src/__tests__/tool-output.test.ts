@@ -9,6 +9,18 @@ import {
 } from '../tool-output.js';
 
 describe('tool-output', () => {
+  it('retains a partial body line after short heading lines', () => {
+    const result = boundText(`Heading\nSource\n\n${'fetch '.repeat(10000)}`, 1024);
+    expect(result).toContain('fetch fetch');
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(1024);
+  });
+
+  it('still bounds the number of lines', () => {
+    const result = boundText('line\n'.repeat(1100));
+    expect(result.split('\n').length).toBeLessThanOrEqual(1000);
+    expect(result).toMatch(/^line\nline/);
+  });
+
   it('retains long single-line search text rather than dropping each field', () => {
     const result = searchOutput({
       provider: 'provider',

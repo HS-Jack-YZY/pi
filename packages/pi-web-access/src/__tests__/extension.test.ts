@@ -153,6 +153,36 @@ describe('piWebToolExtension - tool registration', () => {
     });
     expect(result.content[0].text).toContain('[Pi docs](https://pi.dev)');
   });
+  it('keeps a long fetched body in readable output as well as structured content', async () => {
+    mockLoadSettings.mockReturnValue({
+      fetch: { provider: 'tavily' },
+      providers: { tavily: { apiKey: 'fixture' } },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          results: [{ url: 'https://1.1.1.1/fixture', raw_content: 'fetch '.repeat(10000) }],
+          failed_results: [],
+        }),
+      }),
+    );
+    const pi = createMockPi();
+    piWebToolExtension(pi as any);
+    await pi.triggerSessionStart();
+    const result = await (pi.tools.find((item) => item.name === 'web_fetch') as any).execute(
+      'id',
+      { url: 'https://1.1.1.1/fixture', prompt: 'full' },
+      undefined,
+      undefined,
+      {},
+    );
+    expect(result.content[0].text).toContain('fetch fetch');
+    expect(result.structuredContent.content).toMatch(/^fetch /);
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(50 * 1024);
+  });
+
   it('keeps long single-line search snippets in both readable and structured results', async () => {
     mockLoadSettings.mockReturnValue({
       search: { provider: 'cloudflare' },

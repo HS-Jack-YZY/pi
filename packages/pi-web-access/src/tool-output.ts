@@ -33,16 +33,18 @@ export const fetchOutputSchema = Type.Union([
 
 export function boundText(text: string, maxBytes = MAX_BYTES): string {
   if (maxBytes < 2) return '';
-  const clip = (budget: number) => {
-    const result = truncateHead(text, { maxBytes: budget, maxLines: 1000 });
-    // truncateHead drops an oversized first line; streaming decode keeps its complete UTF-8 prefix.
-    return result.firstLineExceedsLimit
-      ? new TextDecoder('utf-8', { ignoreBOM: true }).decode(
-          Buffer.from(text).subarray(0, budget),
-          { stream: true },
-        )
-      : result.content;
-  };
+  const lineLimited = truncateHead(text, {
+    maxBytes: Number.MAX_SAFE_INTEGER,
+    maxLines: 1000,
+  }).content;
+  const bytes = Buffer.from(lineLimited);
+  // Bound lines first, then bytes; otherwise truncateHead drops oversized body lines entirely.
+  const clip = (budget: number) =>
+    bytes.length <= budget
+      ? lineLimited
+      : new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes.subarray(0, budget), {
+          stream: true,
+        });
   let budget = maxBytes;
   let result = clip(budget);
   while (Buffer.byteLength(JSON.stringify(result)) > maxBytes) {

@@ -4,17 +4,24 @@ import { formatToolResultText } from '../index.js';
 import { imageOutput, imageOutputSchema } from '../tool-output.js';
 
 describe('tool-output', () => {
-  it('retains prefixes of long single-line metadata and revised prompts', () => {
+  it.each([
+    '',
+    'Intro\n',
+  ])('retains prefixes of long metadata and revised prompts with %j heading', (heading) => {
     const result = imageOutput({
       model: 'model '.repeat(100),
       provider: 'provider '.repeat(100),
       images: [
-        { path: '/tmp/image.png', mimeType: 'image/png', revisedPrompt: '中文🙂'.repeat(1000) },
+        {
+          path: '/tmp/image.png',
+          mimeType: 'image/png',
+          revisedPrompt: heading + '中文🙂'.repeat(1000),
+        },
       ],
     });
     expect(result.model).toMatch(/^model /);
     expect(result.provider).toMatch(/^provider /);
-    expect(result.images[0]!.revisedPrompt).toMatch(/^中文🙂/);
+    expect(result.images[0]!.revisedPrompt).toContain('中文🙂');
     expect(Buffer.from(result.images[0]!.revisedPrompt!).toString('utf8')).toBe(
       result.images[0]!.revisedPrompt,
     );
