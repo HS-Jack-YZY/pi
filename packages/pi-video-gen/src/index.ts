@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { open, readFile, rename } from 'node:fs/promises';
-import { extname, join, resolve } from 'node:path';
+import { dirname, extname, join, resolve } from 'node:path';
+import { boundStructuredContent } from '@amaster.ai/pi-shared';
 import { isProjectTrusted } from '@amaster.ai/pi-shared/settings';
 import { StringEnum } from '@earendil-works/pi-ai';
 import {
@@ -35,8 +36,10 @@ import {
   ActiveJobs,
   assertSafeId,
   ensureSingleJobDir,
+  loadComposeJob,
   loadRenderJob,
   loadSingleJob,
+  loadTimelineJob,
   newJobId,
   readJsonFile,
   resolveJobDirInsideOutput,
@@ -63,6 +66,7 @@ import { runRemotion } from './remotion.js';
 import { parseRenderSpec, runRender } from './render.js';
 import { hasCjkFont } from './text-layer.js';
 import { runTimeline } from './timeline-render.js';
+import { videoCapabilitiesOutputSchema, videoJobOutputSchema } from './tool-output.js';
 import type {
   FilmPrompt,
   GenerateVideoParams,
@@ -99,30 +103,43 @@ type TextResult = {
   isError?: true;
   content: { type: 'text'; text: string }[];
   details: Record<string, unknown>;
+  structuredContent: ReturnType<typeof boundStructuredContent>;
 };
 
 function okResult(text: string, details: Record<string, unknown> = {}): TextResult {
-  return { content: [{ type: 'text', text: boundToolText(text) }], details: boundDetails(details) };
+  const data = boundStructuredContent({
+    ...(details.jobId ? { state: 'done', qcStatus: 'not_performed' } : {}),
+    ...details,
+  });
+  return {
+    content: [{ type: 'text', text: boundToolText(text) }],
+    details: boundDetails(details),
+    structuredContent: data,
+    ...('error' in data ? { isError: true } : {}),
+  };
 }
 
 function errResult(text: string, details: Record<string, unknown> = {}): TextResult {
+  const data = boundStructuredContent({
+    ...details,
+    error: truncateHead(text, { maxBytes: 2048, maxLines: 100 }).content,
+  });
   return {
     isError: true,
     content: [{ type: 'text', text: boundToolText(text) }],
     details: boundDetails(details),
+    structuredContent: data,
   };
 }
 
 function boundToolText(text: string): string {
-  const result = truncateHead(text, { maxBytes: 47 * 1024, maxLines: 1_900 });
+  const result = truncateHead(text, { maxBytes: 16 * 1024, maxLines: 800 });
   return result.truncated ? `${result.content}\n\n[pi-video-gen output truncated]` : result.content;
 }
 
 function boundDetails(details: Record<string, unknown>): Record<string, unknown> {
   try {
-    return Buffer.byteLength(JSON.stringify(details), 'utf-8') <= 2 * 1024
-      ? details
-      : { truncated: true };
+    return Buffer.byteLength(JSON.stringify(details)) <= 2048 ? details : { truncated: true };
   } catch {
     return { truncated: true };
   }
@@ -453,10 +470,15 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
     if (toolParams.jobId) {
       assertSafeId(toolParams.jobId, 'job');
       const manifest = loadSingleJob(outputDir, toolParams.jobId);
+      const recovery = {
+        jobId: toolParams.jobId,
+        state: manifest?.state,
+        taskId: manifest?.handle?.taskId,
+      };
       if (manifest?.state === 'ambiguous') {
         return errResult(
           `Job "${toolParams.jobId}" has an ambiguous submit — a paid task MAY exist. Check the provider console before starting another generation; this job will not submit again automatically.`,
-          { jobId: toolParams.jobId },
+          recovery,
         );
       }
       // Terminal states have no business re-polling: a finished job returns
@@ -467,17 +489,20 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
           {
             jobId: manifest.jobId,
             videoPath: manifest.videoPath,
+            taskId: manifest.handle?.taskId,
           },
         );
       }
       if (manifest?.state === 'failed') {
         return errResult(
           `Job ${toolParams.jobId} already failed permanently (its manifest records the reason). Start a fresh generation instead of resuming.`,
+          recovery,
         );
       }
       if (!manifest?.handle) {
         return errResult(
           `No resumable job found with id "${toolParams.jobId}". The manifest is missing or has no task handle; start a fresh generation instead.`,
+          recovery,
         );
       }
       if (
@@ -486,7 +511,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
       ) {
         return errResult(
           `Job ${toolParams.jobId} has a task handle that does not match its frozen request fingerprint. Refusing to poll it; inspect or discard the manifest.`,
-          { jobId: toolParams.jobId },
+          recovery,
         );
       }
       // Frozen task identity, fail-CLOSED: a manifest without identity
@@ -495,6 +520,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
       if (!manifest.modelId || !manifest.providerStyle || !manifest.providerBaseUrl) {
         return errResult(
           `Job ${toolParams.jobId} was created before task-identity freezing and cannot be resumed safely. Start a new job (or delete .video-gen/single/${toolParams.jobId} under your video-gen output directory to clear it).`,
+          recovery,
         );
       }
       // Settings must still point at the same endpoint — polling the old task
@@ -506,6 +532,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
       ) {
         return errResult(
           `Job ${toolParams.jobId} was created with model "${manifest.modelId ?? resolved.remoteId}" on ${manifest.providerStyle ?? resolved.provider.style} (${manifest.providerBaseUrl ? redactUrl(manifest.providerBaseUrl) : 'default endpoint'}), but current settings resolve to "${resolved.remoteId}" on ${resolved.provider.style} (${redactUrl(resolved.provider.baseUrl)}). Restore the previous settings to resume it, or start a new job.`,
+          recovery,
         );
       }
       const jobDir = resolveJobDirInsideOutput(outputDir, singleJobDir(outputDir, manifest.jobId));
@@ -522,7 +549,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
       ) {
         return errResult(
           `Job ${toolParams.jobId} no longer matches its frozen input snapshot. Refusing to poll a task whose request identity cannot be verified.`,
-          { jobId: toolParams.jobId },
+          recovery,
         );
       }
       // Frozen frame verification: resume only if the snapshots are intact.
@@ -538,6 +565,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
           if (actual !== expected) {
             return errResult(
               `Frame snapshot ${rel} changed or is missing — the frozen input is no longer trustworthy. Start a new job.`,
+              recovery,
             );
           }
         }
@@ -724,6 +752,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
               return errResult(`Remote task ${handle.taskId} was cancelled.`, {
                 jobId: manifest.jobId,
                 taskId: handle.taskId,
+                state: 'failed',
               });
             }
           } catch {
@@ -733,7 +762,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
         saveSingleJob(outputDir, { ...manifest, state: 'polling_stopped' });
         return errResult(
           `Stopped locally. NOTE: the remote task ${handle.taskId} may still be running and billable — local stop does not cancel it (Ark task-cancellation support is unverified). Resume polling with video_generate jobId "${manifest.jobId}" once it should have finished.`,
-          { jobId: manifest.jobId, taskId: handle.taskId },
+          { jobId: manifest.jobId, taskId: handle.taskId, state: 'polling_stopped' },
         );
       }
       return handleGenerateError(error, outputDir, manifest.jobId);
@@ -763,8 +792,40 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
       error instanceof RemoteTaskNotFoundError
         ? `Job ${jobId} is no longer visible to the provider, but the paid task may still exist. Its handle was preserved and this job will not resubmit automatically; check the provider console before starting another generation.`
         : errorMessageForUser(error),
-      { jobId },
+      { jobId, state: loadSingleJob(outputDir, jobId)?.state, taskId: existing?.handle?.taskId },
     );
+  };
+
+  const savedJobDetails = (specPath: string, ctx: ExtensionContext): Record<string, unknown> => {
+    try {
+      const jobDir = resolveJobDirInsideOutput(
+        resolveOutputDir(settings, ctx.cwd),
+        dirname(resolve(ctx.cwd, specPath)),
+      );
+      const manifest = specPath.endsWith('timeline-input.json')
+        ? loadTimelineJob(jobDir)
+        : specPath.endsWith('compose-input.json')
+          ? loadComposeJob(jobDir)
+          : specPath.endsWith('render-input.json')
+            ? loadRenderJob(jobDir)
+            : undefined;
+      if (!manifest) return {};
+      return {
+        jobId: manifest.jobId,
+        state: manifest.state,
+        ...('shots' in manifest
+          ? {
+              shots: Object.entries(manifest.shots).map(([id, shot]) => ({
+                id,
+                state: shot.state,
+                taskId: shot.handle?.taskId,
+              })),
+            }
+          : {}),
+      };
+    } catch {
+      return {};
+    } // Invalid or missing persisted state supplies no recovery identity.
   };
 
   /** Shared C0 compose flow for the tool's execute() and `/video-gen compose`. */
@@ -793,7 +854,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
         });
         return okResult(
           `Promo video ready: ${result.finalVideoPath} (${result.segments} segments, ${result.durationSec.toFixed(1)}s). QC frames: ${result.qcFrames.join(', ')}. Job: ${result.jobId}.`,
-          result as unknown as Record<string, unknown>,
+          { ...result, qcStatus: result.qcFrames.length ? 'recorded' : 'not_performed' },
         );
       }
       if (name === 'remotion-input.json') {
@@ -841,7 +902,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
       );
     } catch (error) {
       console.error(`[pi-video-gen] video_compose failed: ${toLogSummary(error)}`);
-      return errResult(errorMessageForUser(error));
+      return errResult(errorMessageForUser(error), savedJobDetails(p.composeSpecPath, ctx));
     }
   };
 
@@ -911,11 +972,14 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
       });
       return okResult(
         `Final video ready: ${result.finalVideoPath} (${result.shotsDone} shots). QC: ${result.qcReportPath ?? 'not recorded'}; frames: ${result.qcFrames.join(', ') || 'not recorded'}.${result.editableProjectDir ? ` Editable project: ${result.editableProjectDir}.` : ''} Job: ${result.jobId}.${degradedNote}`,
-        result as unknown as Record<string, unknown>,
+        {
+          ...result,
+          qcStatus: result.qcReportPath || result.qcFrames.length ? 'recorded' : 'not_performed',
+        },
       );
     } catch (error) {
       console.error(`[pi-video-gen] video_render failed: ${toLogSummary(error)}`);
-      return errResult(errorMessageForUser(error));
+      return errResult(errorMessageForUser(error), savedJobDetails(p.renderSpecPath, ctx));
     }
   };
 
@@ -956,6 +1020,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
       label: 'Generate Video Clip',
       description:
         'Generate one video-model clip directly from a structured prompt and optional frames or trusted assets. Paid and slow. Repeat directly when hands-on control is useful; use video_render only for a prepared batch with recovery.',
+      outputSchema: videoJobOutputSchema,
       parameters: buildGenerateParams(schemaCaps),
       promptSnippet:
         'Generate one short video clip (paid, minutes) from a structured prompt via the active video model',
@@ -984,6 +1049,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
       label: 'Compose Video Clips',
       description:
         'Compose existing media locally: lossless concat (compose-input.json), FFmpeg timeline (timeline-input.json), or a trusted Remotion project (remotion-input.json). No video-model calls; timeline narration may use network TTS.',
+      outputSchema: videoJobOutputSchema,
       parameters: Type.Object({
         composeSpecPath: Type.String({
           description:
@@ -1013,6 +1079,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
       label: 'Render Multi-Shot Video',
       description:
         'Execute a prepared render-input.json with generated and existing video shots. Only generated shots call a paid model; resume persisted tasks and assemble by concat, FFmpeg timeline, or Remotion.',
+      outputSchema: videoJobOutputSchema,
       parameters: Type.Object({
         renderSpecPath: Type.String({
           description:
@@ -1049,10 +1116,26 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
       label: 'Video Model Capabilities',
       description:
         "Read-only: list the active video model's capabilities (duration range, resolutions, aspect ratios, native audio, first/last-frame support, trusted asset modalities) and the registered models. Call before composing AI video prompts or shot books; local video_compose does not need it.",
+      outputSchema: videoCapabilitiesOutputSchema,
       parameters: Type.Object({}),
       promptSnippet: 'Show active video model capabilities and registered models',
       async execute() {
-        return okResult(capabilitiesText());
+        const info = listModelRegistry(settings);
+        const active = resolveModel(settings);
+        return okResult(capabilitiesText(), {
+          ...info,
+          totalModels: info.models.length,
+          ...(active
+            ? {
+                provider: active.provider.style,
+                keyReady: Boolean(active.provider.apiKey),
+                capabilities: {
+                  ...active.entry.capabilities,
+                  ...(active.provider.style !== 'ark' ? { referenceAssetModalities: [] } : {}),
+                },
+              }
+            : {}),
+        });
       },
     });
   };
