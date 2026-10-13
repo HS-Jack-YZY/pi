@@ -449,6 +449,7 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
   function registerToolGroupSurface(): void {
     pi.registerTool({
       name: TOOLS_META_TOOL,
+      exposure: 'model-only',
       label: TOOLS_META_TOOL,
       description:
         'List and activate additional browser tool groups (derived from chrome-devtools-mcp categories: input, navigation, debugging, network, emulation, memory, performance, ...). Call without arguments to list groups and their activation status.',
@@ -462,6 +463,10 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
       promptGuidelines: [
         `Only the core browser tools are active by default. When a task needs network inspection, console details, emulation, heap snapshots, or performance tracing, call ${TOOLS_META_TOOL} with the matching group first — the group's tools become available on the next turn.`,
       ],
+      prepareLoadout: (loadout) =>
+        loadout.declared.some((tool) => tool.name === 'tool_search')
+          ? { hiddenDeclarations: [TOOLS_META_TOOL] }
+          : undefined,
       async execute(_toolCallId: string, params: Record<string, unknown>) {
         const group = typeof params.group === 'string' ? params.group : undefined;
         if (!group) {
@@ -536,6 +541,8 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
   }
 
   async function registerUpstreamTools(): Promise<void> {
+    // Inspect the host, since the extension's installed peer can be a different version.
+    const nativeDiscovery = pi.getAllTools?.().some((tool) => 'exposure' in tool) ?? false;
     await ensureConnected();
     const upstreamTools = await client!.listAllTools();
 
@@ -551,6 +558,19 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
       pi.registerTool({
         name: prefixedName,
         label: prefixedName,
+        ...(nativeDiscovery
+          ? {
+              namespace: {
+                name: 'browser',
+                aliases: ['browser_use'],
+                description: 'Browser automation',
+              },
+              exposure:
+                config?.slim || config?.toolProfile === 'full' || CORE_TOOLS.includes(originalName)
+                  ? ('direct' as const)
+                  : ('deferred' as const),
+            }
+          : {}),
         description,
         ...routingGuidance,
         parameters: Type.Unsafe(tool.inputSchema),

@@ -35,6 +35,10 @@ pnpm add @amaster.ai/pi-image-gen
 
 The package's `pi.extensions` field auto-registers it with the host pi-coding-agent runtime; no extra wiring needed.
 
+## Structured tool results
+
+On Pi runtimes with structured tool support, codemode receives `{ model, provider, images, totalImages, truncated }`. Each image has its saved absolute `path`, `mimeType`, and an optional `revisedPrompt`. The normal tool result still contains the inline Markdown image links for display. Large metadata is bounded: `truncated` identifies shortened prompts or omitted image records, and `totalImages` preserves the full generated count. Failed calls return `{ error }` with `isError: true`; check for `error` before using image paths. Older Pi runtimes retain their text-result behavior.
+
 ## Configure
 
 Settings are read by `pi-shared`'s `loadPiSettings`, which merges three files (low-to-high priority):

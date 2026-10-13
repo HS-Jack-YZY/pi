@@ -123,6 +123,8 @@ With the default `core` profile, only the core loop is visible to the model: `li
 
 Tools that used to be filtered out (`lighthouse_audit`, performance traces, screencast, extension management) are now registered and deferred instead — enabling their categories via the flags above makes them activatable through their group.
 
+Pi hosts with native tool-discovery support also expose upstream tools under the `browser` namespace (alias `browser_use`). Under the `core` profile, optional tools use `deferred` exposure: codemode can find and call them without a manual group activation, and the built-in `tool_search` can discover and activate them for direct calls. On Pi 1.2, enable these built-ins with `pi --tools +codemode,+tool_search`; SDK hosts must load their corresponding built-in extension factories. The existing group tool and command remain available, `full` keeps all tools direct, and older hosts retain manual activation. Tool exposure controls discovery and visibility, not authorization; execution still passes through the host's tool hooks.
+
 ### Experimental
 
 | Option | Type | Default | Description |
@@ -207,3 +209,5 @@ None. Previously excluded upstream tools (`lighthouse_audit`, performance traces
 ## License
 
 Apache-2.0
+
+When native `tool_search` is active, the plugin hides its group-activation tool declaration and guidance from the model. Disabling `tool_search` restores that fallback. Group-activation tools are model-only management tools on native runtimes, so codemode scripts use native discovery instead. The corresponding slash command remains available in both cases; older runtimes keep the existing activation behavior.

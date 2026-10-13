@@ -1,3 +1,5 @@
+const { piVersion } = vi.hoisted(() => ({ piVersion: { value: '1.2.0' } }));
+
 import { beforeEach, describe, expect, it, test, vi } from 'vitest';
 
 // --- Mocks ---
@@ -89,6 +91,10 @@ vi.mock('node:fs', async (importOriginal) => {
 // --- Helpers ---
 
 interface RegisteredTool {
+  prepareLoadout?: (loadout: {
+    declared: { name: string }[];
+  }) => { hiddenDeclarations: readonly string[] } | undefined;
+  exposure?: string;
   name: string;
   label: string;
   description: string;
@@ -113,13 +119,22 @@ const mockPi = {
   registerTool: vi.fn((tool: RegisteredTool) => {
     registeredTools.set(tool.name, tool);
     // Mirror the runtime: newly registered tools become active by default.
-    if (!activeTools.includes(tool.name)) activeTools.push(tool.name);
+    if (
+      (!tool.exposure || tool.exposure === 'direct' || tool.exposure === 'model-only') &&
+      !activeTools.includes(tool.name)
+    )
+      activeTools.push(tool.name);
   }),
   registerCommand: vi.fn(),
   on: vi.fn((event: string, handler: (...args: any[]) => Promise<void>) => {
     if (event === 'session_start') sessionStartHandlers.push(handler);
     if (event === 'session_shutdown') sessionShutdownHandlers.push(handler);
   }),
+  getAllTools: () =>
+    [...registeredTools.values()].map(({ exposure, ...tool }) => ({
+      ...tool,
+      ...(piVersion.value === '1.2.0' ? { exposure: exposure ?? 'direct' } : {}),
+    })),
   getActiveTools: vi.fn(() => [...activeTools]),
   setActiveTools: vi.fn((names: string[]) => {
     activeTools.length = 0;
@@ -160,6 +175,7 @@ async function shutdownExtension() {
 
 describe('browserUseExtension', () => {
   beforeEach(() => {
+    piVersion.value = '1.2.0';
     registeredTools.clear();
     sessionStartHandlers.length = 0;
     sessionShutdownHandlers.length = 0;
@@ -247,6 +263,38 @@ describe('browserUseExtension', () => {
     });
 
     describe('deferred tool groups', () => {
+      it('keeps manual activation on legacy Pi', async () => {
+        piVersion.value = '0.85.1';
+        await startExtension();
+        expect(registeredTools.get('browser_lighthouse_audit')).not.toHaveProperty('exposure');
+        await registeredTools
+          .get('browser_tools')!
+          .execute('id', { group: 'debugging' }, undefined, undefined, {});
+        expect(mockPi.getActiveTools()).toContain('browser_lighthouse_audit');
+      });
+
+      it('hides manual discovery only while native tool_search is active', async () => {
+        await startExtension();
+        const prepare = registeredTools.get('browser_tools')!.prepareLoadout!;
+        expect(prepare({ declared: [] })).toBeUndefined();
+        expect(prepare({ declared: [{ name: 'tool_search' }] })).toEqual({
+          hiddenDeclarations: ['browser_tools'],
+        });
+        expect(prepare({ declared: [] })).toBeUndefined();
+      });
+
+      it('makes optional browser tools natively discoverable without activating them', async () => {
+        await startExtension();
+        expect(registeredTools.get('browser_lighthouse_audit')).toMatchObject({
+          exposure: 'deferred',
+          namespace: { name: 'browser' },
+        });
+        expect(registeredTools.get('browser_click')).toMatchObject({
+          exposure: 'direct',
+          namespace: { name: 'browser' },
+        });
+        expect(mockPi.getActiveTools()).not.toContain('browser_lighthouse_audit');
+      });
       it('activates only the core profile by default', async () => {
         await startExtension();
 

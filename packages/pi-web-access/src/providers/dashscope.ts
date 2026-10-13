@@ -23,12 +23,20 @@ export class DashscopeProvider extends OpenAIProvider {
     super('dashscope');
   }
 
-  override async fetch(targetUrl: string, provider: ResolvedProvider): Promise<FetchResponse> {
-    const data = await this.postResponses<ResponsesApiResult>(provider, {
-      model: provider.model ?? this.defaultModel,
-      input: `Please fetch and return the full content at: ${targetUrl}`,
-      tools: [{ type: 'web_search' }, { type: 'web_extractor' }],
-    });
+  override async fetch(
+    targetUrl: string,
+    provider: ResolvedProvider,
+    signal?: AbortSignal,
+  ): Promise<FetchResponse> {
+    const data = await this.postResponses<ResponsesApiResult>(
+      provider,
+      {
+        model: provider.model ?? this.defaultModel,
+        input: `Please fetch and return the full content at: ${targetUrl}`,
+        tools: [{ type: 'web_search' }, { type: 'web_extractor' }],
+      },
+      signal,
+    );
 
     const extracted: string[] = [];
     for (const item of data.output ?? []) {
@@ -47,12 +55,17 @@ export class DashscopeProvider extends OpenAIProvider {
   override async imageSearch(
     params: ImageSearchParams,
     provider: ResolvedProvider,
+    signal?: AbortSignal,
   ): Promise<SearchResponse> {
-    const data = await this.postResponses<ResponsesApiResult>(provider, {
-      model: provider.model ?? this.defaultModel,
-      input: params.query,
-      tools: [{ type: 'web_search_image' }],
-    });
+    const data = await this.postResponses<ResponsesApiResult>(
+      provider,
+      {
+        model: provider.model ?? this.defaultModel,
+        input: params.query,
+        tools: [{ type: 'web_search_image' }],
+      },
+      signal,
+    );
 
     const results: SearchResult[] = [];
     for (const item of data.output ?? []) {

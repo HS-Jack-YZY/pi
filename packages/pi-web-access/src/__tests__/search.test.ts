@@ -508,7 +508,33 @@ describe('search', () => {
     await expect(search({ query: 'test' }, settings)).rejects.toThrow(
       'DeepSeek API response failed.',
     );
-    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('internal error'));
+    expect(consoleError).toHaveBeenCalledWith('[pi-web-access] DeepSeek response failed');
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain('internal error');
+  });
+
+  it.each([
+    'incomplete',
+    'completed',
+  ])('does not log raw %s response diagnostics', async (status) => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        status,
+        incomplete_details: { reason: 'Bearer private-token' },
+        output: [{ type: 'private-token' }],
+      }),
+    });
+    try {
+      await search(
+        { query: 'test' },
+        { search: { provider: 'deepseek' }, providers: { deepseek: { apiKey: 'fixture' } } },
+      ).catch(() => {});
+      expect(log).toHaveBeenCalled();
+      expect(JSON.stringify(log.mock.calls)).not.toContain('private-token');
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('throws when deepseek response is incomplete with no message', async () => {

@@ -70,7 +70,11 @@ export class ZaiProvider extends BaseProvider {
     return { provider: provider.id, query: params.query, results };
   }
 
-  override async fetch(targetUrl: string, provider: ResolvedProvider): Promise<FetchResponse> {
+  override async fetch(
+    targetUrl: string,
+    provider: ResolvedProvider,
+    signal?: AbortSignal,
+  ): Promise<FetchResponse> {
     if (!provider.apiKey) {
       throw new Error(
         'Z.AI API key not configured. Set ZAI_API_KEY env var or configure in settings.json.',
@@ -89,7 +93,7 @@ export class ZaiProvider extends BaseProvider {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(provider.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+      signal: timeoutSignal(provider.timeoutMs ?? DEFAULT_TIMEOUT_MS, signal),
     });
 
     if (!response.ok) {

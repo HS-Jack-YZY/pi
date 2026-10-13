@@ -7,6 +7,7 @@ import {
 } from '@amaster.ai/pi-shared';
 import TurndownService from 'turndown';
 import { resolveFetchProvider } from './config.js';
+import { timeoutSignal } from './providers/base.js';
 import type { FetchResponse } from './providers/index.js';
 import { getProvider } from './providers/index.js';
 import type { WebToolSettings } from './types.js';
@@ -32,12 +33,16 @@ function trustedHostsFromSettings(settings: WebToolSettings): TrustedHosts {
 
 // ─── Jina Reader (free, supports JS rendering) ──────────────────────────────
 
-async function fetchViaJina(url: string, timeoutMs: number): Promise<FetchResponse> {
+async function fetchViaJina(
+  url: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<FetchResponse> {
   const endpoint = `${JINA_READER_BASE}/${url}`;
 
   const response = await fetch(endpoint, {
     headers: { Accept: 'text/markdown', 'X-No-Cache': 'true' },
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: timeoutSignal(timeoutMs, signal),
   });
 
   if (!response.ok) {
@@ -58,6 +63,7 @@ async function fetchLocal(
   timeoutMs: number,
   lookup?: DnsLookup,
   trustedHosts?: TrustedHosts,
+  signal?: AbortSignal,
 ): Promise<FetchResponse> {
   const response = await safeFetch(
     url,
@@ -66,7 +72,7 @@ async function fetchLocal(
         'User-Agent': USER_AGENT,
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       },
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: timeoutSignal(timeoutMs, signal),
     },
     { lookup, trustedHosts },
   );
@@ -98,12 +104,14 @@ async function fetchWithFallback(
   timeoutMs: number,
   lookup?: DnsLookup,
   trustedHosts?: TrustedHosts,
+  signal?: AbortSignal,
 ): Promise<FetchResponse> {
   await assertPublicHttpUrl(url, { lookup, trustedHosts });
   try {
-    return await fetchViaJina(url, timeoutMs);
-  } catch {
-    return fetchLocal(url, timeoutMs, lookup, trustedHosts);
+    return await fetchViaJina(url, timeoutMs, signal);
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return fetchLocal(url, timeoutMs, lookup, trustedHosts, signal);
   }
 }
 
@@ -113,7 +121,9 @@ export async function webFetch(
   params: WebFetchParams,
   settings: WebToolSettings,
   lookup?: DnsLookup,
+  signal?: AbortSignal,
 ): Promise<FetchResponse> {
+  signal?.throwIfAborted();
   const timeoutMs = settings.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const trustedHosts = trustedHostsFromSettings(settings);
   const resolved = resolveFetchProvider(settings);
@@ -123,7 +133,7 @@ export async function webFetch(
     if (!provider) {
       throw new Error(`Provider "${resolved.id}" is not registered.`);
     }
-    return provider.fetch(params.url, resolved);
+    return provider.fetch(params.url, resolved, signal);
   }
-  return fetchWithFallback(params.url, timeoutMs, lookup, trustedHosts);
+  return fetchWithFallback(params.url, timeoutMs, lookup, trustedHosts, signal);
 }

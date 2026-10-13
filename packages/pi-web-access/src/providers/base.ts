@@ -67,8 +67,12 @@ export interface WebProvider {
     provider: ResolvedProvider,
     signal?: AbortSignal,
   ): Promise<SearchResponse>;
-  fetch(url: string, provider: ResolvedProvider): Promise<FetchResponse>;
-  imageSearch(params: ImageSearchParams, provider: ResolvedProvider): Promise<SearchResponse>;
+  fetch(url: string, provider: ResolvedProvider, signal?: AbortSignal): Promise<FetchResponse>;
+  imageSearch(
+    params: ImageSearchParams,
+    provider: ResolvedProvider,
+    signal?: AbortSignal,
+  ): Promise<SearchResponse>;
 }
 
 export abstract class BaseProvider implements WebProvider {
@@ -78,13 +82,18 @@ export abstract class BaseProvider implements WebProvider {
     throw new Error(`${this.id} does not support web_search.`);
   }
 
-  async fetch(_url: string, _provider: ResolvedProvider): Promise<FetchResponse> {
+  async fetch(
+    _url: string,
+    _provider: ResolvedProvider,
+    _signal?: AbortSignal,
+  ): Promise<FetchResponse> {
     throw new Error(`${this.id} does not support web_fetch.`);
   }
 
   async imageSearch(
     _params: ImageSearchParams,
     _provider: ResolvedProvider,
+    _signal?: AbortSignal,
   ): Promise<SearchResponse> {
     throw new Error(`${this.id} does not support image_search.`);
   }

@@ -29,6 +29,7 @@ type ToolDef = {
   promptSnippet?: string;
   promptGuidelines?: string[];
   parameters: { properties?: Record<string, unknown> };
+  outputSchema?: unknown;
   execute: (...args: unknown[]) => Promise<unknown>;
 };
 type CommandDef = { description?: string; handler: (args: string, ctx: unknown) => Promise<void> };
@@ -105,6 +106,7 @@ describe('piImageGenExtension', () => {
     await startSession(handlers);
     const tool = tools.get('image_generate');
     expect(tool).toBeDefined();
+    expect(tool?.outputSchema).toBeDefined();
     expect(tool?.promptSnippet).toBeTruthy();
     expect(Array.isArray(tool?.promptGuidelines)).toBe(true);
     expect(tool?.promptGuidelines?.length).toBeGreaterThan(0);
@@ -482,6 +484,8 @@ describe('image_generate execute error surfaces are sanitized', () => {
     expect(result.isError).not.toBe(true);
     expect(result.content.map((item) => item.text).join('\n')).toMatch(/Generated 1 image/i);
     expect(fetchMock).toHaveBeenCalledOnce();
+    expect(result).toHaveProperty('structuredContent.images.0.path');
+    expect(result).toHaveProperty('structuredContent.provider', 'openai');
   });
 
   it('leaks neither the signed download URL nor a raw error to stderr or the tool result', async () => {

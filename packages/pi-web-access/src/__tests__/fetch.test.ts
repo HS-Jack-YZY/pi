@@ -30,6 +30,36 @@ describe('webFetch', () => {
     process.env = originalEnv;
   });
 
+  it.each([
+    'zai',
+    'tavily',
+    'dashscope',
+    'anthropic',
+    'firecrawl',
+    'you',
+    'openrouter',
+    'perplexity',
+    undefined,
+  ] as const)('cancels %s fetching without falling back after caller abort', async (provider) => {
+    const controller = new AbortController();
+    mockFetch.mockImplementation(async (_url, options) => {
+      controller.abort();
+      expect(options.signal.aborted).toBe(true);
+      throw controller.signal.reason;
+    });
+    const settings: WebToolSettings = provider
+      ? {
+          fetch: { provider },
+          providers: { [provider]: { apiKey: 'fixture' } },
+        }
+      : {};
+    await expect(
+      webFetch({ url: 'https://example.com' }, settings, publicLookup, controller.signal),
+    ).rejects.toThrow('aborted');
+    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(safeFetchMock).not.toHaveBeenCalled();
+  });
+
   it('fetches via zai when configured as default', async () => {
     const settings: WebToolSettings = {
       fetch: { provider: 'zai' },
