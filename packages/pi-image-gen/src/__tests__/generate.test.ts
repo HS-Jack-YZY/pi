@@ -741,9 +741,11 @@ describe('generateImage', () => {
 
     expect(calls[0]?.url).toBe('https://openrouter.ai/api/v1/images');
     const refs = calls[0]?.body.input_references as Array<{
+      type: string;
       image_url: { url: string };
     }>;
     expect(refs).toHaveLength(1);
+    expect(refs[0]?.type).toBe('image_url');
     expect(refs[0]?.image_url.url.startsWith('data:image/png;base64,')).toBe(true);
   });
 
