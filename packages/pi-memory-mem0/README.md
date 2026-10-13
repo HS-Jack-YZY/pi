@@ -13,6 +13,7 @@ Semantic memory extension powered by [Mem0](https://mem0.ai), with Platform, emb
 Safety boundaries:
 
 - **Recall channel**: recalled memories are injected as a custom message delivered on the user channel — never into the system prompt. Each entry is wrapped as `[UNTRUSTED MEMORY DATA]` (JSON-quoted), and entries matching prompt-injection patterns are replaced with `[BLOCKED UNTRUSTED MEMORY: ...]`.
+- **Recall trigger**: automatic recall is consumed when a user prompt starts a run. Custom-message runs triggered by another extension do not consume pending recall.
 - **Project namespacing**: memories are scoped to `userId:project:<cwd-hash>` by default, so one project's memories are not visible in another. Set `userIdScope: "exact"` when one identity must be shared across projects.
 - **Credential redaction**: private keys, bearer tokens, and `api_key=…`-style values are redacted before anything is stored.
 - **Platform mode disclosure**: in `platform` mode the captured turns leave your machine and are processed by Mem0 Cloud. Use `embedded` or `self-hosted` mode to keep memory traffic off third-party infrastructure.

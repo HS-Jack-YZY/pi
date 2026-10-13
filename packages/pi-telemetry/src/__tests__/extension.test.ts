@@ -87,6 +87,60 @@ describe('telemetryExtension', () => {
     });
   });
 
+  it.each([
+    'scheduled work',
+    [{ type: 'text', text: 'scheduled work' }],
+  ])('records the input of extension-triggered runs: %j', async (content) => {
+    telemetryExtension(mockPi as any);
+    await fireEvent('session_start', {});
+    await fireEvent('before_agent_start', {
+      messageType: 'custom',
+      message: { content },
+      systemPrompt: 'memory snapshot',
+    });
+    await fireEvent('turn_start', { timestamp: Date.now() });
+    expect(getPublishedEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'chat_turn_started',
+          details: { input: 'scheduled work' },
+        }),
+      ]),
+    );
+  });
+
+  it('records cancellation from settlement even without an assistant message', async () => {
+    telemetryExtension(mockPi as any);
+    await fireEvent('session_start', {});
+    await fireEvent('turn_start', { timestamp: Date.now() });
+    await fireEvent('agent_end', { messages: [] });
+    await fireEvent('agent_settled', { aborted: true });
+    expect(getPublishedEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'chat_turn_failed', error: 'Run cancelled' }),
+      ]),
+    );
+  });
+
+  it('records images in extension-triggered runs without exposing binary payloads', async () => {
+    telemetryExtension(mockPi as any);
+    await fireEvent('session_start', {});
+    await fireEvent('before_agent_start', {
+      messageType: 'custom',
+      message: { content: [{ type: 'image', mimeType: 'image/png', data: 'aGVsbG8=' }] },
+      systemPrompt: '',
+    });
+    await fireEvent('turn_start', { timestamp: Date.now() });
+    expect(getPublishedEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'chat_turn_started',
+          details: { input: [{ role: 'user', content: '\n[image image/png, binary omitted]' }] },
+        }),
+      ]),
+    );
+  });
+
   it('marks aborted generations and roots as failed while keeping the response', async () => {
     telemetryExtension(mockPi as any);
     await fireEvent('session_start', {});
@@ -566,6 +620,7 @@ describe('telemetryExtension', () => {
       toolName: 'read_file',
       result: 'file contents',
       isError: false,
+      durationMs: 37,
     });
 
     const events = getPublishedEvents();
@@ -574,6 +629,7 @@ describe('telemetryExtension', () => {
       toolCallId: 'call-1',
       toolName: 'read_file',
       status: 'completed',
+      durationMs: 37,
       details: { output: 'file contents' },
     });
   });

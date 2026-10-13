@@ -280,8 +280,8 @@ export default function mem0Extension(pi: ExtensionAPI): void {
       });
   });
 
-  pi.on('before_agent_start', async () => {
-    if (!prefetch) return;
+  pi.on('before_agent_start', async (event) => {
+    if (!prefetch || event.messageType === 'custom') return;
 
     const recalled = await prefetch.consume();
     if (!recalled) return;

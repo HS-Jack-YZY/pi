@@ -247,7 +247,9 @@ describe('extension — default file storage mode', () => {
       .get('scheduler_run_now')!
       .execute('run', { taskId }, undefined, undefined, toolCtx);
     await vi.waitFor(() => {
-      expect(pi.sendUserMessage).toHaveBeenCalledWith('session-owned prompt');
+      expect(pi.sendUserMessage).toHaveBeenCalledWith('session-owned prompt', {
+        deliverAs: 'followUp',
+      });
     });
 
     for (const handler of pi.eventHandlers.session_shutdown ?? []) {

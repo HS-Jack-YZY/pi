@@ -151,14 +151,12 @@ export default function goalExtension(
   // now — event.prompt carries what the user wants this turn, which is the
   // signal to derive from. Fires once per prompt; we clear the flag after.
   pi.on('before_agent_start', async (event, ctx) => {
-    if (!pendingDerive) return;
+    if (!pendingDerive || event.messageType === 'custom') return;
     pendingDerive = false;
-    const evt = event as unknown as { prompt?: unknown };
-    const prompt = typeof evt.prompt === 'string' ? evt.prompt : '';
     // activate=false: the agent is about to run this prompt, so don't inject an
     // activation message (it would throw "already processing"). The run reaches
     // agent_end on its own, where the engine evaluates the goal.
-    await deriveAndSet(ctx, prompt, false);
+    await deriveAndSet(ctx, event.prompt, false);
   });
 
   pi.on('agent_end', async (event, ctx) => {
@@ -174,7 +172,7 @@ export default function goalExtension(
           state,
           config,
           registry,
-          sendUserMessage: (content) => pi.sendUserMessage(content),
+          sendUserMessage: (content) => pi.sendUserMessage(content, { deliverAs: 'followUp' }),
           notify: (message, level) => ctx.ui.notify(message, level),
           setStatus: (text) => ctx.ui.setStatus(STATUS_KEY, text),
           ...(ctx.signal ? { signal: ctx.signal } : {}),

@@ -33,6 +33,7 @@ describe('runtime compatibility', () => {
     '0.84.1',
     '0.84.2',
     '1.0.4',
+    '1.2.0',
   ])('finishes prompts on the supported boundary for Pi %s', async (version) => {
     runtime.version = version;
     const handlers = new Map<string, (...args: any[]) => unknown>();
@@ -44,7 +45,7 @@ describe('runtime compatibility', () => {
     await handlers.get('input')!({ text: 'hello' }, {});
     await handlers.get('turn_start')!({ timestamp: Date.now() }, {});
     await handlers.get('agent_end')!({ messages: [] }, {});
-    const supportsSettlement = version === '0.84.2' || version === '1.0.4';
+    const supportsSettlement = version === '0.84.2' || version.startsWith('1.');
     expect(events.filter((event) => event.type === 'chat_turn_completed')).toHaveLength(
       supportsSettlement ? 0 : 1,
     );

@@ -130,6 +130,7 @@ export async function handleAnalyzeScreenshot(
 ): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {
   const instruction = String(args.instruction ?? '');
   const screenshotArgs = typeof args.pageId === 'number' ? { pageId: args.pageId } : {};
+  let phase = 'capture';
 
   try {
     const screenshotResult = await client.callTool('take_screenshot', screenshotArgs, signal);
@@ -158,6 +159,7 @@ export async function handleAnalyzeScreenshot(
       };
     }
 
+    phase = 'vision';
     const analysis = await callVision(instruction, imageBase64, mimeType, signal);
 
     if (!analysis) {
@@ -178,24 +180,78 @@ export async function handleAnalyzeScreenshot(
   } catch (error) {
     if (signal?.aborted) throw error;
     const errorMsg = error instanceof Error ? error.message : String(error);
+    if (phase === 'vision' && errorMsg.includes('not found in model registry'))
+      phase = 'model_lookup';
+    if (phase === 'vision' && errorMsg.startsWith('Auth failed for vision model:'))
+      phase = 'authentication';
 
     const isModelError =
-      errorMsg.includes('404') ||
-      errorMsg.includes('403') ||
-      errorMsg.includes('not found') ||
-      errorMsg.includes('permission');
+      phase !== 'capture' &&
+      (errorMsg.includes('404') ||
+        errorMsg.includes('403') ||
+        errorMsg.includes('not found') ||
+        errorMsg.includes('permission'));
 
-    if (!isModelError) {
-      const errorName = error instanceof Error ? error.name : 'UnknownError';
-      console.error(`[pi-browser-use] visual analysis failed (${errorName})`);
+    const status = errorMsg.match(/\b([45]\d{2})\b/)?.[1];
+    const category = status
+      ? 'http'
+      : phase === 'model_lookup' || phase === 'authentication'
+        ? 'configuration'
+        : /timeout|timed out/i.test(errorMsg)
+          ? 'timeout'
+          : /fetch failed|ECONN|ENOTFOUND/i.test(errorMsg)
+            ? 'network'
+            : 'unknown';
+    const errorType =
+      error instanceof Error &&
+      ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'TimeoutError'].includes(error.name)
+        ? error.name
+        : 'UnknownError';
+    const httpReasons: Record<string, string> = {
+      '400': 'Request parameters or input were rejected.',
+      '401': 'Service credentials were rejected.',
+      '403': 'Service access was denied.',
+      '404': 'Requested model or endpoint is not available.',
+      '408': 'Service request timed out.',
+      '429': 'Service rate limit or quota was exceeded.',
+    };
+    let reason = `Unexpected ${errorType}.`;
+    if (category === 'timeout') reason = 'Request timed out.';
+    if (category === 'network') reason = 'Could not connect to the service.';
+    if (phase === 'model_lookup') reason = 'Configured vision model is not registered.';
+    if (phase === 'authentication') reason = 'Vision credentials could not be resolved.';
+    if (status) {
+      const fallback = status.startsWith('5')
+        ? 'Service failed to handle the request.'
+        : 'Service rejected the request.';
+      reason = `HTTP ${status}: ${httpReasons[status] ?? fallback}`;
     }
+    const fields = [
+      'temperature',
+      'max_tokens',
+      'max_completion_tokens',
+      'reasoning_effort',
+      'thinking',
+      'image_url',
+      'messages',
+      'stream',
+      'model',
+    ].filter((field) => errorMsg.includes(field));
+    console.error(
+      `[pi-browser-use] visual analysis failed (phase=${phase}, status=${status ?? 'unknown'}, category=${category}, fields=${fields.join(',') || 'none'}): ${reason}`,
+    );
 
     const fallbackMsg = isModelError
       ? 'Visual analysis model is not available. Use accessibility tree elements (uids from take_snapshot) for all interactions instead.'
       : 'Visual analysis failed. Use accessibility tree elements instead.';
 
     return {
-      content: [{ type: 'text', text: fallbackMsg }],
+      content: [
+        {
+          type: 'text',
+          text: `${fallbackMsg}\nFailure at ${phase}: ${reason}${fields.length ? ` Fields: ${fields.join(', ')}.` : ''}`,
+        },
+      ],
       isError: true,
     };
   }

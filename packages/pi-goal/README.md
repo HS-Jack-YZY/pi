@@ -58,7 +58,7 @@ Events pi-goal uses:
 |-------|-------------------|-------|
 | `session_start` | Load config; read the `--goal` flag | Session-level, fires once |
 | `before_agent_start` | If a `--goal` derivation is pending, derive the condition from `event.prompt` (this turn's user input), then set the goal | Fires once per prompt; the right anchor for auto-derivation since no transcript exists yet at `session_start` |
-| `agent_end` | If a goal is active, run the engine on `event.messages`: evaluate → mark achieved/impossible or `sendUserMessage` to continue | Engine core. `event.messages` is the full conversation, so no separate buffering is needed |
+| `agent_end` | If a goal is active, run the engine on `event.messages`: evaluate → mark achieved/impossible or queue a `sendUserMessage` follow-up to continue | Engine core. `event.messages` is the full conversation, so no separate buffering is needed |
 | `session_shutdown` | Clear the goal | Cleanup |
 
 The interactive `/goal` command (no argument) derives from the session's own history, read via `ctx.sessionManager` — not a buffer this extension maintains.

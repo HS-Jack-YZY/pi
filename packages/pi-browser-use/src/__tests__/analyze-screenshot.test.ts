@@ -68,6 +68,64 @@ function failingVisionCaller(error: string): VisionCaller {
 }
 
 describe('handleAnalyzeScreenshot', () => {
+  it.each([
+    ['429 quota exceeded; token=private-token', 'vision', 'HTTP 429', 'rate limit or quota'],
+    ['Auth failed for vision model: private-token', 'authentication', 'credentials', 'credentials'],
+    [
+      'Vision model "private-token" not found in model registry.',
+      'model_lookup',
+      'not registered',
+      'not registered',
+    ],
+    ['request timed out; private-token', 'vision', 'timed out', 'timed out'],
+  ])('explains %s without returning the underlying response', async (message, phase, marker, reason) => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const result = await handleAnalyzeScreenshot(
+        createMockClient(),
+        failingVisionCaller(message),
+        {},
+      );
+      expect(result.content[0]?.text).toContain(marker);
+      expect(log.mock.calls.flat().join('\n')).toContain(`phase=${phase}`);
+      expect(log.mock.calls.flat().join('\n')).toContain(reason);
+      expect(JSON.stringify([result, log.mock.calls])).not.toContain('private-token');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('identifies screenshot transport failures separately from vision requests', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const client = createMockClient();
+      client.callTool.mockRejectedValueOnce(new TypeError('private-token'));
+      const result = await handleAnalyzeScreenshot(client, mockVisionCaller('unused'), {});
+      expect(result.content[0]?.text).toContain('capture');
+      expect(result.content[0]?.text).toContain('TypeError');
+      expect(JSON.stringify([result, log.mock.calls])).not.toContain('private-token');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('logs bounded failure classification without the provider response or credentials', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const caller = failingVisionCaller(
+        '400 invalid max_tokens; Bearer private-token; raw response',
+      );
+      const result = await handleAnalyzeScreenshot(createMockClient(), caller, {});
+      expect(result.isError).toBe(true);
+      expect(log).toHaveBeenCalledWith(
+        '[pi-browser-use] visual analysis failed (phase=vision, status=400, category=http, fields=max_tokens): HTTP 400: Request parameters or input were rejected.',
+      );
+      expect(JSON.stringify(result)).not.toContain('private-token');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   test('successful flow returns analysis', async () => {
     const client = createMockClient();
     const caller = mockVisionCaller('Blue button at (150, 300)');

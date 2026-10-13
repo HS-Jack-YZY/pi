@@ -27,9 +27,9 @@ The extension hooks into the following Pi lifecycle events:
 | `message_update` | Record provider stream events beneath the active LLM generation |
 | `agent_end` | Store the latest result; complete immediately on legacy Pi |
 | `agent_before_settle` | Record the final run outcome when available |
-| `agent_settled` | Complete the root or subagent span and flush after retries and queued continuations finish |
+| `agent_settled` | Complete the root or subagent span and flush after retries and queued continuations finish; record cancellation from `aborted` when available |
 | `tool_execution_start` | Begin tool span |
-| `tool_execution_end` | End tool span with result |
+| `tool_execution_end` | End tool span with result and native execution `durationMs` when available (Pi 1.1+) |
 | `message_end` | Complete an LLM generation span with output and usage |
 | `model_select` | Record model switch events |
 | `tool_result` | Record reported tool-internal LLM usage under its tool span |
