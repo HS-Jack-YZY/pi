@@ -24,6 +24,28 @@ describe('summarizeContent', () => {
     vi.clearAllMocks();
   });
 
+  it('rejects resolved provider errors without exposing raw details', async () => {
+    mockCtx.modelRegistry.find.mockReturnValue({ id: 'model' });
+    mockCtx.modelRegistry.getApiKeyAndHeaders.mockResolvedValue({ ok: true });
+    mockComplete.mockResolvedValue({
+      content: [],
+      stopReason: 'error',
+      errorMessage: 'Bearer private-token',
+    } as any);
+    await expect(summarizeContent('content', 'prompt', config, mockCtx)).rejects.toThrow(
+      'Summary model request failed.',
+    );
+  });
+
+  it('passes caller cancellation to the summary request', async () => {
+    mockCtx.modelRegistry.find.mockReturnValue({ id: 'model' });
+    mockCtx.modelRegistry.getApiKeyAndHeaders.mockResolvedValue({ ok: true });
+    mockComplete.mockResolvedValue({ content: [] } as any);
+    const controller = new AbortController();
+    await summarizeContent('content', 'prompt', config, mockCtx, controller.signal);
+    expect(mockComplete.mock.calls[0]![2]!.signal).toBe(controller.signal);
+  });
+
   it('calls complete with content and prompt, returns text', async () => {
     const mockModel = { id: 'gpt-4o-mini', provider: 'openai' };
     mockCtx.modelRegistry.find.mockReturnValue(mockModel);

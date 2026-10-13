@@ -1,10 +1,10 @@
 import { isProjectTrusted } from '@amaster.ai/pi-shared/settings';
-import {
-  type ExtensionAPI,
-  type ExtensionContext,
-  truncateHead,
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
-import { Type } from 'typebox';
+import { type TSchema, Type } from 'typebox';
 import {
   loadWebToolSettings,
   resolveImageSearchProvider,
@@ -17,6 +17,13 @@ import { getProvider } from './providers/index.js';
 import type { XaiProvider } from './providers/xai.js';
 import { search } from './search.js';
 import { summarizeContent } from './summary.js';
+import {
+  boundText,
+  fetchOutput,
+  fetchOutputSchema,
+  searchOutput,
+  searchOutputSchema,
+} from './tool-output.js';
 import type { WebToolSettings } from './types.js';
 
 export {
@@ -74,6 +81,28 @@ function formatImageSearch(response: SearchResponse): string {
 
 export default function piWebToolExtension(pi: ExtensionAPI): void {
   let settings: WebToolSettings = {};
+  const registerTool = <P extends TSchema>(tool: ToolDefinition<P>) =>
+    pi.registerTool({
+      ...tool,
+      async execute(...args) {
+        try {
+          return await tool.execute(...args);
+        } catch (error) {
+          if (args[2]?.aborted) throw error;
+          const status = (error instanceof Error ? error.message : '').match(
+            /(?:^|HTTP[ :]+)([45]\d{2})\b/,
+          )?.[1];
+          const message = `${tool.name} failed${status ? ` (HTTP ${status})` : ''}. Check the provider configuration and retry.`;
+          console.error(`[pi-web-access] ${message}`);
+          return {
+            isError: true,
+            content: [{ type: 'text', text: message }],
+            details: undefined,
+            structuredContent: { error: message },
+          };
+        }
+      },
+    });
 
   pi.on('session_start', async (_event: unknown, ctx: ExtensionContext) => {
     settings = loadWebToolSettings(ctx.cwd, isProjectTrusted(ctx));
@@ -87,23 +116,7 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
 
     if (hasSearch) {
       const runSearch = async (searchParams: SearchParams, signal?: AbortSignal) => {
-        let response: SearchResponse;
-        try {
-          response = await search(searchParams, settings, signal);
-        } catch (err) {
-          if (searchResolved.id !== 'cloudflare') throw err;
-          return {
-            isError: true,
-            content: [
-              {
-                type: 'text' as const,
-                text: err instanceof Error ? err.message : 'Cloudflare search failed.',
-              },
-            ],
-            details: undefined,
-          };
-        }
-
+        const response = searchOutput(await search(searchParams, settings, signal));
         const lines: string[] = [];
         lines.push(`## Web Search Results (${response.provider})`);
         lines.push(`**Query:** ${response.query}`);
@@ -135,12 +148,19 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
           lines.push('');
         }
 
-        const text = truncateHead(lines.join('\n')).content;
-        return { content: [{ type: 'text' as const, text }], details: undefined };
+        if (response.truncated)
+          lines.unshift('[Result truncated: some source metadata or text was omitted.]');
+        const text = boundText(lines.join('\n'));
+        return {
+          content: [{ type: 'text' as const, text }],
+          details: undefined,
+          structuredContent: response,
+        };
       };
 
-      pi.registerTool({
+      registerTool({
         name: 'web_search',
+        outputSchema: searchOutputSchema,
         label: 'WebSearch',
         promptSnippet: 'Search the web for current information and source URLs.',
         promptGuidelines: [
@@ -214,7 +234,7 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
           }
           try {
             const result = await runSearch({ query }, cmdCtx.signal);
-            cmdCtx.ui.notify(result.content[0]!.text, result.isError ? 'error' : 'info');
+            cmdCtx.ui.notify(result.content[0]!.text, 'info');
           } catch {
             console.error('[pi-web-access] web-search command failed');
             cmdCtx.ui.notify(
@@ -227,8 +247,9 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
     }
 
     if (hasFetch) {
-      pi.registerTool({
+      registerTool({
         name: 'web_fetch',
+        outputSchema: fetchOutputSchema,
         label: 'WebFetch',
         description: [
           'Retrieve content from a public HTTP(S) URL.',
@@ -248,12 +269,12 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
         async execute(
           _toolCallId: string,
           params: Record<string, unknown>,
-          _signal: AbortSignal | undefined,
+          signal: AbortSignal | undefined,
           _onUpdate: unknown,
           fetchCtx: ExtensionContext,
         ) {
           const fetchParams = params as unknown as { url: string; prompt: string };
-          const result = await webFetch({ url: fetchParams.url }, settings);
+          const result = await webFetch({ url: fetchParams.url }, settings, undefined, signal);
 
           let content = result.content;
           if (settings.fetch?.summary) {
@@ -262,6 +283,7 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
               fetchParams.prompt,
               settings.fetch.summary,
               fetchCtx,
+              signal,
             );
           }
 
@@ -271,8 +293,15 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
           lines.push('');
           lines.push(content);
 
-          const text = lines.join('\n');
-          return { content: [{ type: 'text' as const, text }], details: undefined };
+          const structuredContent = fetchOutput({ url: result.url, title: result.title, content });
+          if (structuredContent.truncated)
+            lines.unshift('[Result truncated: some content was omitted.]');
+          const text = boundText(lines.join('\n'));
+          return {
+            content: [{ type: 'text' as const, text }],
+            details: undefined,
+            structuredContent,
+          };
         },
       });
     }
@@ -281,8 +310,9 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
     const xaiResolved = resolveProvider('xai', settings);
     const hasXai = !('error' in xaiResolved) && Boolean(xaiResolved.apiKey);
     if (hasXai) {
-      pi.registerTool({
+      registerTool({
         name: 'x_search',
+        outputSchema: searchOutputSchema,
         label: 'XSearch',
         description: [
           '- Searches X (Twitter) for posts, threads, and social media content',
@@ -308,7 +338,7 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
         async execute(
           _toolCallId: string,
           params: Record<string, unknown>,
-          _signal: AbortSignal | undefined,
+          signal: AbortSignal | undefined,
           _onUpdate: unknown,
           _ctx: ExtensionContext,
         ) {
@@ -320,7 +350,7 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
             fromDate?: string;
             toDate?: string;
           };
-          const response = await xaiProvider.xsearch(xParams, xaiResolved);
+          const response = searchOutput(await xaiProvider.xsearch(xParams, xaiResolved, signal));
 
           const lines: string[] = [];
           lines.push(`## X Search Results`);
@@ -342,8 +372,14 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
             lines.push('');
           }
 
-          const text = lines.join('\n');
-          return { content: [{ type: 'text' as const, text }], details: undefined };
+          if (response.truncated)
+            lines.unshift('[Result truncated: some source metadata or text was omitted.]');
+          const text = boundText(lines.join('\n'));
+          return {
+            content: [{ type: 'text' as const, text }],
+            details: undefined,
+            structuredContent: response,
+          };
         },
       });
     }
@@ -352,17 +388,31 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
     const imageSearchResolved = resolveImageSearchProvider(settings);
     const hasImageSearch = !('error' in imageSearchResolved) && Boolean(imageSearchResolved.apiKey);
     if (hasImageSearch) {
-      const runImageSearch = async (query: string): Promise<string> => {
+      const runImageSearch = async (query: string, signal?: AbortSignal) => {
         const provider = getProvider(imageSearchResolved.id);
         if (!provider) {
           throw new Error(`Provider "${imageSearchResolved.id}" is not registered.`);
         }
-        const response = await provider.imageSearch({ query }, imageSearchResolved);
-        return formatImageSearch(response);
+        const response = searchOutput(
+          await provider.imageSearch({ query }, imageSearchResolved, signal),
+        );
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: boundText(
+                `${response.truncated ? '[Result truncated]\n' : ''}${formatImageSearch(response)}`,
+              ),
+            },
+          ],
+          details: undefined,
+          structuredContent: response,
+        };
       };
 
-      pi.registerTool({
+      registerTool({
         name: 'image_search',
+        outputSchema: searchOutputSchema,
         label: 'ImageSearch',
         description: [
           '- Searches the web for images matching a text description',
@@ -375,13 +425,12 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
         async execute(
           _toolCallId: string,
           params: Record<string, unknown>,
-          _signal: AbortSignal | undefined,
+          signal: AbortSignal | undefined,
           _onUpdate: unknown,
           _ctx: ExtensionContext,
         ) {
           const imageParams = params as unknown as ImageSearchParams;
-          const text = await runImageSearch(imageParams.query);
-          return { content: [{ type: 'text' as const, text }], details: undefined };
+          return runImageSearch(imageParams.query, signal);
         },
       });
 
@@ -394,12 +443,11 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
             return;
           }
           try {
-            cmdCtx.ui.notify(await runImageSearch(query), 'info');
-          } catch (err) {
-            cmdCtx.ui.notify(
-              `image-search failed: ${err instanceof Error ? err.message : 'unknown error'}`,
-              'error',
-            );
+            cmdCtx.ui.notify((await runImageSearch(query, cmdCtx.signal)).content[0]!.text, 'info');
+          } catch {
+            const message = 'image-search failed. Check the provider configuration and retry.';
+            console.error(`[pi-web-access] ${message}`);
+            cmdCtx.ui.notify(message, 'error');
           }
         },
       });

@@ -64,8 +64,7 @@ export class OpenAIProvider extends BaseProvider {
 
     const data = (await response.json()) as T;
     if (data.status === 'failed') {
-      const detail = (data.error?.message ?? 'unknown error').slice(0, 300);
-      console.error(`[pi-web-access] ${name} response failed: ${detail}`);
+      console.error(`[pi-web-access] ${name} response failed`);
       throw new Error(`${name} API response failed.`);
     }
     return data;
@@ -158,19 +157,18 @@ export class OpenAIProvider extends BaseProvider {
     }
 
     if (!answer && data.status && data.status !== 'completed') {
-      const reason = (data.incomplete_details?.reason ?? 'unknown').slice(0, 300);
-      console.error(`[pi-web-access] ${name} response ${data.status}: ${reason}`);
-      throw new Error(`${name} API response did not produce an answer (status: ${data.status}).`);
+      const status = data.status === 'incomplete' ? 'incomplete' : 'unknown';
+      const reason = ['max_output_tokens', 'content_filter'].includes(
+        data.incomplete_details?.reason ?? '',
+      )
+        ? data.incomplete_details!.reason
+        : 'unknown';
+      console.error(`[pi-web-access] ${name} response ${status}: ${reason}`);
+      throw new Error(`${name} API response did not produce an answer (status: ${status}).`);
     }
 
     if (!answer) {
-      const types = (data.output ?? [])
-        .map((i) => i.type)
-        .join(',')
-        .slice(0, 200);
-      console.error(
-        `[pi-web-access] ${name} response returned no answer (status: ${data.status ?? 'unknown'}, output types: ${types})`,
-      );
+      console.error(`[pi-web-access] ${name} response returned no answer`);
     }
 
     return {

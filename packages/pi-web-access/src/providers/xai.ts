@@ -64,7 +64,11 @@ export class XaiProvider extends BaseProvider {
     return this.parseResponse(params.query, provider, response);
   }
 
-  async xsearch(params: XSearchParams, provider: ResolvedProvider): Promise<SearchResponse> {
+  async xsearch(
+    params: XSearchParams,
+    provider: ResolvedProvider,
+    signal?: AbortSignal,
+  ): Promise<SearchResponse> {
     if (!provider.apiKey) {
       throw new Error(
         'xAI API key not configured. Set XAI_API_KEY env var or configure in settings.json.',
@@ -96,7 +100,7 @@ export class XaiProvider extends BaseProvider {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(provider.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+      signal: timeoutSignal(provider.timeoutMs ?? DEFAULT_TIMEOUT_MS, signal),
     });
     if (!response.ok) {
       const text = await response.text().catch(() => '');

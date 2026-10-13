@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import piWebToolExtension from '../index.js';
 
 vi.mock('../config.js', async (importOriginal) => {
@@ -52,6 +52,202 @@ function createMockPi() {
 describe('piWebToolExtension - tool registration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([
+    ['x_search', 'xai'],
+    ['image_search', 'unsplash'],
+    ['image_search', 'dashscope'],
+  ] as const)('propagates %s cancellation through %s to fetch', async (name, provider) => {
+    mockLoadSettings.mockReturnValue({
+      imageSearch: { provider },
+      providers: { [provider]: { apiKey: 'fixture' } },
+    } as any);
+    const controller = new AbortController();
+    const fetch = vi.fn(async (_url, options) => {
+      controller.abort();
+      expect(options.signal.aborted).toBe(true);
+      throw controller.signal.reason;
+    });
+    vi.stubGlobal('fetch', fetch);
+    const pi = createMockPi();
+    piWebToolExtension(pi as any);
+    await pi.triggerSessionStart();
+    const tool = pi.tools.find((item) => item.name === name) as any;
+    await expect(
+      tool.execute('id', { query: 'Pi' }, controller.signal, undefined, {}),
+    ).rejects.toBe(controller.signal.reason);
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it('propagates image-search command cancellation to the request', async () => {
+    mockLoadSettings.mockReturnValue({
+      imageSearch: { provider: 'unsplash' },
+      providers: { unsplash: { apiKey: 'fixture' } },
+    });
+    const controller = new AbortController();
+    let requestSignal: AbortSignal | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url, options) => {
+        requestSignal = options.signal;
+        return { ok: true, json: async () => ({ results: [] }) };
+      }),
+    );
+    const pi = createMockPi();
+    piWebToolExtension(pi as any);
+    await pi.triggerSessionStart();
+    await (pi.commands.get('image-search') as any).handler('Pi', {
+      signal: controller.signal,
+      ui: { notify: vi.fn() },
+    });
+    controller.abort();
+    expect(requestSignal?.aborted).toBe(true);
+  });
+
+  it('sanitizes image-search command failures and logs a safe diagnostic', async () => {
+    mockLoadSettings.mockReturnValue({
+      imageSearch: { provider: 'unsplash' },
+      providers: { unsplash: { apiKey: 'fixture' } },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Bearer private-token')));
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const pi = createMockPi();
+      piWebToolExtension(pi as any);
+      await pi.triggerSessionStart();
+      const notify = vi.fn();
+      await (pi.commands.get('image-search') as any).handler('Pi', { ui: { notify } });
+      expect(notify).toHaveBeenCalledWith(expect.stringContaining('image-search failed'), 'error');
+      expect(JSON.stringify(notify.mock.calls)).not.toContain('private-token');
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('[pi-web-access]'));
+      expect(JSON.stringify(log.mock.calls)).not.toContain('private-token');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('returns search objects alongside readable source links', async () => {
+    mockLoadSettings.mockReturnValue({
+      search: { provider: 'cloudflare' },
+      providers: { cloudflare: { apiKey: 'key', accountId: 'account' } },
+    });
+    mockSearch.mockResolvedValue({
+      provider: 'cloudflare',
+      query: 'Pi',
+      results: [{ title: 'Pi docs', url: 'https://pi.dev', content: 'Extensions' }],
+    });
+    const pi = createMockPi();
+    piWebToolExtension(pi as any);
+    await pi.triggerSessionStart();
+    const tool = pi.tools.find((item) => item.name === 'web_search') as any;
+    const result = await tool.execute('id', { query: 'Pi' }, undefined, undefined, {});
+    expect(tool.outputSchema).toBeDefined();
+    expect(result.structuredContent).toEqual({
+      provider: 'cloudflare',
+      query: 'Pi',
+      results: [{ title: 'Pi docs', url: 'https://pi.dev', content: 'Extensions' }],
+      truncated: false,
+    });
+    expect(result.content[0].text).toContain('[Pi docs](https://pi.dev)');
+  });
+  it('keeps a long fetched body in readable output as well as structured content', async () => {
+    mockLoadSettings.mockReturnValue({
+      fetch: { provider: 'tavily' },
+      providers: { tavily: { apiKey: 'fixture' } },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          results: [{ url: 'https://1.1.1.1/fixture', raw_content: 'fetch '.repeat(10000) }],
+          failed_results: [],
+        }),
+      }),
+    );
+    const pi = createMockPi();
+    piWebToolExtension(pi as any);
+    await pi.triggerSessionStart();
+    const result = await (pi.tools.find((item) => item.name === 'web_fetch') as any).execute(
+      'id',
+      { url: 'https://1.1.1.1/fixture', prompt: 'full' },
+      undefined,
+      undefined,
+      {},
+    );
+    expect(result.content[0].text).toContain('fetch fetch');
+    expect(result.structuredContent.content).toMatch(/^fetch /);
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(50 * 1024);
+  });
+
+  it('keeps long single-line search snippets in both readable and structured results', async () => {
+    mockLoadSettings.mockReturnValue({
+      search: { provider: 'cloudflare' },
+      providers: { cloudflare: { apiKey: 'fixture', accountId: 'fixture' } },
+    });
+    mockSearch.mockResolvedValue({
+      provider: 'cloudflare',
+      query: 'Pi',
+      answer: 'answer '.repeat(1000),
+      results: [
+        { title: 'title '.repeat(100), url: 'https://pi.dev', content: 'snippet '.repeat(300) },
+      ],
+    });
+    const pi = createMockPi();
+    piWebToolExtension(pi as any);
+    await pi.triggerSessionStart();
+    const result = await (pi.tools.find((item) => item.name === 'web_search') as any).execute(
+      'id',
+      { query: 'Pi' },
+      undefined,
+      undefined,
+      {},
+    );
+    expect(result.content[0].text).toContain('snippet snippet');
+    expect(result.content[0].text).toContain('answer answer');
+    expect(result.structuredContent.results[0].content).toMatch(/^snippet /);
+    expect(result.structuredContent.results[0].title).toMatch(/^title /);
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(50 * 1024);
+  });
+
+  it('propagates cancellation instead of returning a structured failure', async () => {
+    mockLoadSettings.mockReturnValue({
+      search: { provider: 'cloudflare' },
+      providers: { cloudflare: { apiKey: 'key', accountId: 'account' } },
+    });
+    const controller = new AbortController();
+    controller.abort();
+    mockSearch.mockRejectedValue(controller.signal.reason);
+    const pi = createMockPi();
+    piWebToolExtension(pi as any);
+    await pi.triggerSessionStart();
+    const tool = pi.tools.find((item) => item.name === 'web_search') as any;
+    await expect(
+      tool.execute('id', { query: 'Pi' }, controller.signal, undefined, {}),
+    ).rejects.toBe(controller.signal.reason);
+  });
+  it('returns safe structured errors without raw provider data', async () => {
+    mockLoadSettings.mockReturnValue({
+      search: { provider: 'tavily' },
+      providers: { tavily: { apiKey: 'key' } },
+    });
+    mockSearch.mockRejectedValue(new Error('HTTP 401: Bearer private-token'));
+    const pi = createMockPi();
+    piWebToolExtension(pi as any);
+    await pi.triggerSessionStart();
+    const result = await (pi.tools.find((item) => item.name === 'web_search') as any).execute(
+      'id',
+      { query: 'Pi' },
+      undefined,
+      undefined,
+      {},
+    );
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent.error).toContain('HTTP 401');
+    expect(JSON.stringify(result)).not.toContain('private-token');
   });
 
   it('registers web_search when search.provider is configured with key', async () => {

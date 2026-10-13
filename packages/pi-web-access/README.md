@@ -48,6 +48,12 @@ Search the web for images. Only registered when an image search provider (`dashs
 |-----------|------|----------|-------------|
 | `query` | string | yes | Description of the images to search for |
 
+## Structured tool results
+
+On Pi runtimes with structured tool support, codemode receives objects from these tools instead of parsing their Markdown. `web_search`, `x_search`, and `image_search` return `{ provider, query, answer?, results, truncated }`, where each source has `title`, `url`, `content`, and an optional `score`. `web_fetch` returns `{ url, title, content, truncated }`; content is the summary when a summary model is configured. Readable tool results remain available.
+
+Results are bounded and `truncated` indicates shortened text or omitted sources; retained source URLs are never shortened. Failed calls return `{ error }` with `isError: true`, so scripts must check for `error` before reading result fields. Cancellation still aborts the call. Older Pi runtimes keep their text-result behavior.
+
 ## Providers
 
 | Provider | Search | Fetch | X Search | Image Search | Default Base URL | Env Var | Default Model |

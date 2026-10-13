@@ -1,6 +1,10 @@
 import { isProjectTrusted } from '@amaster.ai/pi-shared/settings';
 import { StringEnum } from '@earendil-works/pi-ai';
-import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
+import {
+  type ExtensionAPI,
+  type ExtensionContext,
+  truncateHead,
+} from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import {
   capabilitySizeDescription,
@@ -16,6 +20,7 @@ import {
 } from './config.js';
 import { errorMessageForUser, toLogSummary } from './errors.js';
 import { generateImage } from './generate.js';
+import { imageOutput, imageOutputSchema } from './tool-output.js';
 import type {
   ApiStyle,
   GenerateImageParams,
@@ -83,6 +88,7 @@ export default function piImageGenExtension(pi: ExtensionAPI): void {
     const caps = resolveImageToolCapabilities(settings);
     pi.registerTool({
       name: 'image_generate',
+      outputSchema: imageOutputSchema,
       label: 'ImageGen',
       description:
         'Generate or edit images. The image model is fixed by pi-image-gen.defaultModel in settings (this tool does not accept a model parameter). Pass `image` to do image-to-image / edit / style transfer / character preservation: a regular image file inside the session cwd (absolute or relative) or a public http(s) URL. To iterate on a previous result, pass its file path back when it is inside cwd. Do NOT pass base64 or data: URIs — write bytes to a file under cwd first. Saves the output to disk and returns the absolute path(s). When reporting the result to the user, render each generated image as inline markdown — copy the `![alt](…)` line(s) from the tool result verbatim so the UI can display it; do not just paste the bare path. Run /image-gen list to see the active model.',
@@ -94,10 +100,11 @@ export default function piImageGenExtension(pi: ExtensionAPI): void {
         const params = rawParams as GenerateImageParams;
         const cwd = ctx?.cwd ?? sessionCwd;
         try {
-          const result = await runGenerate(params, cwd, signal);
+          const result = imageOutput(await runGenerate(params, cwd, signal));
           return {
             content: [{ type: 'text' as const, text: formatToolResultText(result) }],
             details: result,
+            structuredContent: result,
           };
         } catch (error) {
           // Both surfaces are sanitized (see errors.ts): errorMessageForUser
@@ -105,14 +112,19 @@ export default function piImageGenExtension(pi: ExtensionAPI): void {
           // sentence for any unexpected throw), while toLogSummary gives stderr a
           // terse category. Neither echoes a raw fs/fetch error or response body.
           console.error(`[pi-image-gen] image_generate failed: ${toLogSummary(error)}`);
+          const errorText = truncateHead(`image_generate failed: ${errorMessageForUser(error)}`, {
+            maxBytes: 2048,
+            maxLines: 100,
+          }).content;
           return {
             content: [
               {
                 type: 'text' as const,
-                text: `image_generate failed: ${errorMessageForUser(error)}`,
+                text: errorText,
               },
             ],
             details: undefined,
+            structuredContent: { error: errorText },
             isError: true,
           };
         }
@@ -401,9 +413,11 @@ export function buildImageGuidelines(caps: ImageToolCapabilities): string[] {
  * Format a generated-image result as text the LLM can paste verbatim into its
  * reply. Uses inline markdown image syntax with the file stem as the alt text.
  */
-export function formatToolResultText(result: ImageGenResult): string {
+export function formatToolResultText(
+  result: ImageGenResult & { totalImages?: number; truncated?: boolean },
+): string {
   const lines: string[] = [
-    `Generated ${result.images.length} image(s) via ${result.provider} (${result.model}). Show each one to the user as inline markdown — copy the lines below verbatim into your reply:`,
+    `Generated ${result.totalImages ?? result.images.length} image(s) via ${result.provider} (${result.model}). Show each one to the user as inline markdown — copy the lines below verbatim into your reply:`,
     '',
     ...result.images.flatMap((img) => {
       const alt = altFromPath(img.path);
@@ -411,6 +425,8 @@ export function formatToolResultText(result: ImageGenResult): string {
       return img.revisedPrompt ? [md, `> revised prompt: ${img.revisedPrompt}`] : [md];
     }),
   ];
+  if (result.truncated)
+    lines.push('Image metadata truncated; totalImages is the full generated count.');
   return lines.join('\n');
 }
 

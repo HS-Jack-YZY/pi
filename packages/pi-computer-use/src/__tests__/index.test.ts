@@ -1,3 +1,5 @@
+const { piVersion } = vi.hoisted(() => ({ piVersion: { value: '1.2.0' } }));
+
 import { EventEmitter } from 'node:events';
 import { mkdtemp, realpath, rename, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -142,6 +144,10 @@ vi.mock('../vision.js', () => ({
 }));
 
 interface RegisteredTool {
+  prepareLoadout?: (loadout: {
+    declared: { name: string }[];
+  }) => { hiddenDeclarations: readonly string[] } | undefined;
+  exposure?: string;
   name: string;
   description: string;
   execute: (
@@ -173,13 +179,22 @@ const mockPi = {
   registerTool: vi.fn((tool: RegisteredTool) => {
     tools.set(tool.name, tool);
     // Mirror the runtime: newly registered tools become active by default.
-    if (!activeTools.includes(tool.name)) activeTools.push(tool.name);
+    if (
+      (!tool.exposure || tool.exposure === 'direct' || tool.exposure === 'model-only') &&
+      !activeTools.includes(tool.name)
+    )
+      activeTools.push(tool.name);
   }),
   registerCommand: vi.fn((name: string, command: RegisteredCommand) => commands.set(name, command)),
   on: vi.fn((event: string, handler: (event: unknown, ctx: typeof mockCtx) => Promise<void>) => {
     handlers[event] ??= [];
     handlers[event].push(handler);
   }),
+  getAllTools: () =>
+    [...tools.values()].map(({ exposure, ...tool }) => ({
+      ...tool,
+      ...(piVersion.value === '1.2.0' ? { exposure: exposure ?? 'direct' } : {}),
+    })),
   getActiveTools: vi.fn(() => [...activeTools]),
   setActiveTools: vi.fn((names: string[]) => {
     activeTools.length = 0;
@@ -205,6 +220,7 @@ async function start(config?: Record<string, unknown>, platform = 'darwin') {
 
 describe('computerUseExtension', () => {
   beforeEach(() => {
+    piVersion.value = '1.2.0';
     mockConnect = async () => {};
     mockCallTool = (name) =>
       name === 'check_permissions'
@@ -1110,6 +1126,37 @@ describe('computerUseExtension', () => {
   });
 
   describe('deferred tool groups', () => {
+    it('hides manual discovery only while native tool_search is active', async () => {
+      await start();
+      const prepare = tools.get('computer_use_tools')!.prepareLoadout!;
+      expect(prepare({ declared: [] })).toBeUndefined();
+      expect(prepare({ declared: [{ name: 'tool_search' }] })).toEqual({
+        hiddenDeclarations: ['computer_use_tools'],
+      });
+      expect(prepare({ declared: [] })).toBeUndefined();
+    });
+
+    it('exposes optional desktop tools through native discovery', async () => {
+      await start();
+      expect(tools.get('computer_use_browser_navigate')).toMatchObject({
+        exposure: 'deferred',
+        namespace: { name: 'computer_use' },
+      });
+      expect(tools.get('computer_use_click')).toMatchObject({
+        exposure: 'direct',
+        namespace: { name: 'computer_use' },
+      });
+    });
+    it('keeps manual activation on legacy Pi', async () => {
+      piVersion.value = '0.85.1';
+      await start();
+      expect(tools.get('computer_use_browser_navigate')).not.toHaveProperty('exposure');
+      await tools
+        .get('computer_use_tools')!
+        .execute('id', { group: 'browser' }, undefined, undefined, mockCtx);
+      expect(mockPi.getActiveTools()).toContain('computer_use_browser_navigate');
+    });
+
     it('activates only the core profile by default', async () => {
       await start();
 

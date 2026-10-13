@@ -1008,12 +1008,19 @@ describe('DashscopeProvider', () => {
 
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ status: 'failed', error: { message: 'tool failed' } }),
+      json: async () => ({ status: 'failed', error: { message: 'Bearer private-token' } }),
     });
 
-    await expect(provider.imageSearch({ query: 'test' }, resolved)).rejects.toThrow(
-      'DashScope API response failed.',
-    );
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect(provider.imageSearch({ query: 'test' }, resolved)).rejects.toThrow(
+        'DashScope API response failed.',
+      );
+      expect(log).toHaveBeenCalled();
+      expect(JSON.stringify(log.mock.calls)).not.toContain('private-token');
+    } finally {
+      log.mockRestore();
+    }
   });
 });
 

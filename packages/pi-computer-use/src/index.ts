@@ -268,6 +268,7 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
       .join(', ');
     pi.registerTool({
       name: TOOLS_META_TOOL,
+      exposure: 'model-only',
       label: TOOLS_META_TOOL,
       description: `List and activate additional computer-use tool groups: ${groupSummary}. Call without arguments to list groups and their activation status.`,
       parameters: Type.Object({
@@ -282,6 +283,10 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
       promptGuidelines: [
         `Only the core computer-use tools are active by default. When a task needs browser automation, recording, escalated sessions, cursor overlay, window management, clipboard, or diagnostics capabilities, call ${TOOLS_META_TOOL} with the matching group first — the group's tools become available on the next turn.`,
       ],
+      prepareLoadout: (loadout) =>
+        loadout.declared.some((tool) => tool.name === 'tool_search')
+          ? { hiddenDeclarations: [TOOLS_META_TOOL] }
+          : undefined,
       async execute(_toolCallId: string, params: Record<string, unknown>) {
         const group = typeof params.group === 'string' ? params.group : undefined;
         if (!group) {
@@ -364,6 +369,8 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
   function registerTools(
     tools: ReadonlyArray<{ name: string; description?: string | undefined; inputSchema: unknown }>,
   ): void {
+    // Inspect the host, since the extension's installed peer can be a different version.
+    const nativeDiscovery = pi.getAllTools?.().some((tool) => 'exposure' in tool) ?? false;
     for (const tool of tools) {
       const prefixedName = `${TOOL_PREFIX}${tool.name}`;
       const originalName = tool.name;
@@ -372,6 +379,19 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
       pi.registerTool({
         name: prefixedName,
         label: prefixedName,
+        ...(nativeDiscovery
+          ? {
+              namespace: {
+                name: 'computer_use',
+                aliases: ['desktop'],
+                description: 'Desktop and browser automation',
+              },
+              exposure:
+                config?.toolProfile === 'full' || CORE_TOOLS.includes(originalName)
+                  ? ('direct' as const)
+                  : ('deferred' as const),
+            }
+          : {}),
         description: tool.description ?? '',
         parameters: Type.Unsafe(tool.inputSchema as object),
         async execute(

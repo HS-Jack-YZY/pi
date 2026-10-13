@@ -69,7 +69,11 @@ export class YouProvider extends BaseProvider {
     return { provider: provider.id, query: params.query, results };
   }
 
-  override async fetch(url: string, provider: ResolvedProvider): Promise<FetchResponse> {
+  override async fetch(
+    url: string,
+    provider: ResolvedProvider,
+    signal?: AbortSignal,
+  ): Promise<FetchResponse> {
     if (!provider.apiKey) {
       throw new Error(
         'You.com API key not configured. Set YDC_API_KEY env var or configure in settings.json.',
@@ -88,7 +92,7 @@ export class YouProvider extends BaseProvider {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(provider.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+      signal: timeoutSignal(provider.timeoutMs ?? DEFAULT_TIMEOUT_MS, signal),
     });
 
     if (!response.ok) {

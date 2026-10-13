@@ -12,6 +12,7 @@ export async function summarizeContent(
   prompt: string,
   config: SummaryModelConfig,
   ctx: ExtensionContext,
+  signal?: AbortSignal,
 ): Promise<string> {
   const model = ctx.modelRegistry.find(config.provider, config.model);
   if (!model) {
@@ -31,6 +32,7 @@ export async function summarizeContent(
       : content;
 
   const options: Record<string, unknown> = {
+    signal,
     temperature: 0,
     maxTokens: 4096,
   };
@@ -57,6 +59,8 @@ export async function summarizeContent(
     options,
   );
 
+  signal?.throwIfAborted();
+  if (result.stopReason === 'error') throw new Error('Summary model request failed.');
   return result.content
     .filter((c): c is AiTextContent => c.type === 'text')
     .map((c) => c.text)

@@ -86,7 +86,11 @@ export class PerplexityProvider extends BaseProvider {
     return { provider: provider.id, query: params.query, answer, results };
   }
 
-  override async fetch(targetUrl: string, provider: ResolvedProvider): Promise<FetchResponse> {
+  override async fetch(
+    targetUrl: string,
+    provider: ResolvedProvider,
+    signal?: AbortSignal,
+  ): Promise<FetchResponse> {
     if (!provider.apiKey) {
       throw new Error(
         'Perplexity API key not configured. Set PERPLEXITY_API_KEY env var or configure in settings.json.',
@@ -110,7 +114,7 @@ export class PerplexityProvider extends BaseProvider {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(provider.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+      signal: timeoutSignal(provider.timeoutMs ?? DEFAULT_TIMEOUT_MS, signal),
     });
     if (!response.ok) {
       const text = await response.text().catch(() => '');

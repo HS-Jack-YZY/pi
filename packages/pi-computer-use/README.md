@@ -77,6 +77,8 @@ With the default `core` profile, only everyday tools are visible to the model (`
 
 Activated groups stay active for the rest of the session; each new session starts from the configured profile again.
 
+Pi hosts with native tool-discovery support expose driver tools under the `computer_use` namespace (alias `desktop`). Optional tools use `deferred` exposure under the `core` profile, so codemode can discover and call them and the built-in `tool_search` can activate them for direct use. On Pi 1.2, enable these built-ins with `pi --tools +codemode,+tool_search`; SDK hosts must load their corresponding built-in extension factories. Existing group activation, the `full` profile, and older-host behavior remain available. Deferred calls retain the same driver permissions, high-risk confirmations, cancellation, and host tool hooks as direct calls.
+
 ### Optional vision model
 
 ```json
@@ -130,3 +132,5 @@ Linux and Windows tool descriptions and schemas come from the exact live driver.
 ## License
 
 Apache-2.0 for this extension package. Bundled Cua Driver assets retain the upstream MIT license and release metadata in each platform package.
+
+When native `tool_search` is active, the plugin hides its group-activation tool declaration and guidance from the model. Disabling `tool_search` restores that fallback. Group-activation tools are model-only management tools on native runtimes, so codemode scripts use native discovery instead. The corresponding slash command remains available in both cases; older runtimes keep the existing activation behavior.
