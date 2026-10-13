@@ -130,6 +130,7 @@ export async function handleAnalyzeScreenshot(
 ): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {
   const instruction = String(args.instruction ?? '');
   const screenshotArgs = typeof args.pageId === 'number' ? { pageId: args.pageId } : {};
+  let phase = 'capture';
 
   try {
     const screenshotResult = await client.callTool('take_screenshot', screenshotArgs, signal);
@@ -158,6 +159,7 @@ export async function handleAnalyzeScreenshot(
       };
     }
 
+    phase = 'vision';
     const analysis = await callVision(instruction, imageBase64, mimeType, signal);
 
     if (!analysis) {
@@ -185,10 +187,28 @@ export async function handleAnalyzeScreenshot(
       errorMsg.includes('not found') ||
       errorMsg.includes('permission');
 
-    if (!isModelError) {
-      const errorName = error instanceof Error ? error.name : 'UnknownError';
-      console.error(`[pi-browser-use] visual analysis failed (${errorName})`);
-    }
+    const status = errorMsg.match(/\b([45]\d{2})\b/)?.[1];
+    const category = status
+      ? 'http'
+      : /timeout|timed out/i.test(errorMsg)
+        ? 'timeout'
+        : /fetch failed|ECONN|ENOTFOUND/i.test(errorMsg)
+          ? 'network'
+          : 'unknown';
+    const fields = [
+      'temperature',
+      'max_tokens',
+      'max_completion_tokens',
+      'reasoning_effort',
+      'thinking',
+      'image_url',
+      'messages',
+      'stream',
+      'model',
+    ].filter((field) => errorMsg.includes(field));
+    console.error(
+      `[pi-browser-use] visual analysis failed (phase=${phase}, status=${status ?? 'unknown'}, category=${category}, fields=${fields.join(',') || 'none'})`,
+    );
 
     const fallbackMsg = isModelError
       ? 'Visual analysis model is not available. Use accessibility tree elements (uids from take_snapshot) for all interactions instead.'

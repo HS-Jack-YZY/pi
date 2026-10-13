@@ -68,6 +68,23 @@ function failingVisionCaller(error: string): VisionCaller {
 }
 
 describe('handleAnalyzeScreenshot', () => {
+  it('logs bounded failure classification without the provider response or credentials', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const caller = failingVisionCaller(
+        '400 invalid max_tokens; Bearer private-token; raw response',
+      );
+      const result = await handleAnalyzeScreenshot(createMockClient(), caller, {});
+      expect(result.isError).toBe(true);
+      expect(log).toHaveBeenCalledWith(
+        '[pi-browser-use] visual analysis failed (phase=vision, status=400, category=http, fields=max_tokens)',
+      );
+      expect(JSON.stringify(result)).not.toContain('private-token');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   test('successful flow returns analysis', async () => {
     const client = createMockClient();
     const caller = mockVisionCaller('Blue button at (150, 300)');
