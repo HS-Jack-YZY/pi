@@ -153,6 +153,36 @@ describe('piWebToolExtension - tool registration', () => {
     });
     expect(result.content[0].text).toContain('[Pi docs](https://pi.dev)');
   });
+  it('keeps long single-line search snippets in both readable and structured results', async () => {
+    mockLoadSettings.mockReturnValue({
+      search: { provider: 'cloudflare' },
+      providers: { cloudflare: { apiKey: 'fixture', accountId: 'fixture' } },
+    });
+    mockSearch.mockResolvedValue({
+      provider: 'cloudflare',
+      query: 'Pi',
+      answer: 'answer '.repeat(1000),
+      results: [
+        { title: 'title '.repeat(100), url: 'https://pi.dev', content: 'snippet '.repeat(300) },
+      ],
+    });
+    const pi = createMockPi();
+    piWebToolExtension(pi as any);
+    await pi.triggerSessionStart();
+    const result = await (pi.tools.find((item) => item.name === 'web_search') as any).execute(
+      'id',
+      { query: 'Pi' },
+      undefined,
+      undefined,
+      {},
+    );
+    expect(result.content[0].text).toContain('snippet snippet');
+    expect(result.content[0].text).toContain('answer answer');
+    expect(result.structuredContent.results[0].content).toMatch(/^snippet /);
+    expect(result.structuredContent.results[0].title).toMatch(/^title /);
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(50 * 1024);
+  });
+
   it('propagates cancellation instead of returning a structured failure', async () => {
     mockLoadSettings.mockReturnValue({
       search: { provider: 'cloudflare' },

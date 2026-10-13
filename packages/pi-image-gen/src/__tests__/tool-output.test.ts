@@ -4,6 +4,23 @@ import { formatToolResultText } from '../index.js';
 import { imageOutput, imageOutputSchema } from '../tool-output.js';
 
 describe('tool-output', () => {
+  it('retains prefixes of long single-line metadata and revised prompts', () => {
+    const result = imageOutput({
+      model: 'model '.repeat(100),
+      provider: 'provider '.repeat(100),
+      images: [
+        { path: '/tmp/image.png', mimeType: 'image/png', revisedPrompt: '中文🙂'.repeat(1000) },
+      ],
+    });
+    expect(result.model).toMatch(/^model /);
+    expect(result.provider).toMatch(/^provider /);
+    expect(result.images[0]!.revisedPrompt).toMatch(/^中文🙂/);
+    expect(Buffer.from(result.images[0]!.revisedPrompt!).toString('utf8')).toBe(
+      result.images[0]!.revisedPrompt,
+    );
+    expect(result.truncated).toBe(true);
+  });
+
   it('bounds provider prompts while preserving saved image paths and total count', () => {
     const result = imageOutput({
       model: 'image-model',

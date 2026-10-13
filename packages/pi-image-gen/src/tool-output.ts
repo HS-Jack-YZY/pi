@@ -19,16 +19,26 @@ export const imageOutputSchema = Type.Union([
   Type.Object({ error: Type.String() }),
 ]);
 
+function clipText(text: string, maxBytes: number, maxLines: number) {
+  const result = truncateHead(text, { maxBytes, maxLines });
+  return result.firstLineExceedsLimit
+    ? new TextDecoder('utf-8', { ignoreBOM: true }).decode(
+        Buffer.from(text).subarray(0, maxBytes),
+        { stream: true },
+      )
+    : result.content;
+}
+
 export function imageOutput(result: ImageGenResult) {
-  const model = truncateHead(result.model, { maxBytes: 256, maxLines: 10 }).content;
-  const provider = truncateHead(result.provider, { maxBytes: 256, maxLines: 10 }).content;
+  const model = clipText(result.model, 256, 10);
+  const provider = clipText(result.provider, 256, 10);
   let truncated = model !== result.model || provider !== result.provider;
   const output = {
     model,
     provider,
     images: result.images.map((image) => {
       if (image.revisedPrompt === undefined) return { path: image.path, mimeType: image.mimeType };
-      const prompt = truncateHead(image.revisedPrompt, { maxBytes: 1024, maxLines: 100 }).content;
+      const prompt = clipText(image.revisedPrompt, 1024, 100);
       truncated ||= prompt !== image.revisedPrompt;
       return { path: image.path, mimeType: image.mimeType, revisedPrompt: prompt };
     }),
