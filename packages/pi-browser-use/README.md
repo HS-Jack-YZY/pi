@@ -174,6 +174,8 @@ Enable `browser_analyze_screenshot` by referencing a model already configured in
 
 The extension resolves API key, base URL, and headers from the model registry automatically — no need to duplicate credentials here.
 
+Screenshot-analysis failures report the failing phase, HTTP status when available, and a bounded explanation in both stderr and the tool result. Credentials, image data, raw provider responses, and stack traces are omitted. For example, HTTP 429 identifies a service rate limit or quota problem instead of a generic `Error`.
+
 With the default page ID routing enabled, visual analysis also targets a page explicitly:
 
 ```text
