@@ -94,7 +94,7 @@ export default function taskSchedulerExtension(
           if (ctx.sessionManager.getSessionId() !== task.sessionId) {
             throw new Error('Scheduled task belongs to a different session.');
           }
-          pi.sendUserMessage(task.prompt);
+          pi.sendUserMessage(task.prompt, { deliverAs: 'followUp' });
         };
 
         const instance = new PersistentTaskScheduler({

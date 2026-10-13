@@ -124,6 +124,12 @@ describe('goalExtension wiring', () => {
     expect(deriveCondition).not.toHaveBeenCalled();
     expect(pi.sendUserMessage).not.toHaveBeenCalled();
 
+    await pi.eventHandlers.before_agent_start![0]!(
+      { type: 'before_agent_start', messageType: 'custom', message: { content: 'wake up' } },
+      ctx,
+    );
+    expect(deriveCondition).not.toHaveBeenCalled();
+
     // First before_agent_start carries the prompt → derive and set the goal.
     deriveCondition.mockResolvedValue('The login endpoint returns 200 for valid credentials');
     await pi.eventHandlers.before_agent_start![0]!(
@@ -227,7 +233,9 @@ describe('goalExtension wiring', () => {
       { type: 'agent_end', messages: [{ role: 'assistant', content: 'ran tests' }] },
       ctx,
     );
-    expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining('still failing'));
+    expect(pi.sendUserMessage).toHaveBeenCalledWith(expect.stringContaining('still failing'), {
+      deliverAs: 'followUp',
+    });
   });
 
   it('agent_end is a no-op after the goal is cleared', async () => {

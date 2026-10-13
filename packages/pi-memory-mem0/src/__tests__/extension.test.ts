@@ -244,6 +244,7 @@ describe('memoryMode gating', () => {
     expect(tools.map((t) => t.name)).toEqual(['mem0_memory']);
 
     await handlers.input![0]!({ text: 'what pets do I like' }, ctx);
+    expect(await handlers.before_agent_start![0]!({ messageType: 'custom' }, ctx)).toBeUndefined();
     const recall = (await handlers.before_agent_start![0]!({}, ctx)) as
       | { message?: { content: string } }
       | undefined;

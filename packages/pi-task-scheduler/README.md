@@ -6,6 +6,8 @@ Scheduled task domain types, execution scheduler, and pi agent extension.
 
 The package owns schedule parsing, task lifecycle state, process-local timers, runner callbacks, scheduler hooks, and LLM-callable tools for autonomous task management.
 
+The default Pi extension runner delivers scheduled prompts as follow-ups: an idle agent starts immediately, while a busy agent queues the prompt for later processing in the same session.
+
 ## Storage
 
 The package ships with a built-in file-based storage (default, zero external dependencies):

@@ -426,8 +426,19 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
   });
 
   pi.on('before_agent_start', (event) => {
-    pendingInput ??= event.prompt;
-    pendingImages = event.images ?? pendingImages;
+    if ('prompt' in event) {
+      pendingInput ??= event.prompt;
+      pendingImages = event.images ?? pendingImages;
+    } else {
+      pendingInput ??=
+        typeof event.message.content === 'string'
+          ? event.message.content
+          : textContentFromToolResult({ content: event.message.content });
+      pendingImages =
+        typeof event.message.content === 'string'
+          ? []
+          : event.message.content.filter((block) => block.type === 'image');
+    }
     systemPrompt = event.systemPrompt;
   });
   pi.on('agent_start', (_event, ctx) => {
@@ -526,7 +537,10 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
           };
   });
 
-  pi.on('agent_settled', async (_event, ctx) => {
+  pi.on('agent_settled', async (event, ctx) => {
+    if (event.aborted && !boundaryFailure.error) {
+      boundaryFailure = { error: 'Run cancelled', outcome: 'aborted' };
+    }
     await completeTrace();
     await exporter.flush?.();
     showStatus(ctx);
@@ -647,6 +661,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
       toolName: event.toolName,
       status: event.isError ? 'failed' : 'completed',
       createdAt: new Date().toISOString(),
+      ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
       ...resultDetails,
       ...(!event.isError &&
       Array.isArray(event.result?.content) &&
