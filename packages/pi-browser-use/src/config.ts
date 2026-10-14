@@ -46,6 +46,19 @@ export interface BrowserUseConfig {
   extraArgs?: string[];
 
   /**
+   * Additional environment variable names the MCP subprocess may inherit,
+   * on top of DEFAULT_ENV_ALLOWLIST. Everything else is stripped so secrets
+   * in the host environment do not reach the subprocess.
+   */
+  envAllowlist?: string[];
+
+  /**
+   * Environment variable names the MCP subprocess must never receive.
+   * Takes precedence over DEFAULT_ENV_ALLOWLIST and envAllowlist.
+   */
+  envBlocklist?: string[];
+
+  /**
    * Which upstream tools are active at session start: 'core' activates only
    * the everyday toolset (extra groups via the browser_tools tool or the
    * /browser-tools command), 'full' activates every discovered tool.
@@ -55,6 +68,70 @@ export interface BrowserUseConfig {
 }
 
 export const DEFAULT_PROFILE_DIR = join(homedir(), '.pi', 'browser-profile');
+
+/**
+ * Environment variables the MCP subprocess needs for Chrome and the network:
+ * process basics, the graphical session (headful Chrome), and proxies.
+ */
+export const DEFAULT_ENV_ALLOWLIST: readonly string[] = [
+  // Process basics
+  'PATH',
+  'HOME',
+  'TMPDIR',
+  'TEMP',
+  'TMP',
+  'LANG',
+  'LC_ALL',
+  'TZ',
+  'USER',
+  // Linux graphical session (headful Chrome)
+  'DISPLAY',
+  'WAYLAND_DISPLAY',
+  'XAUTHORITY',
+  'XDG_RUNTIME_DIR',
+  'DBUS_SESSION_BUS_ADDRESS',
+  'XDG_CONFIG_HOME',
+  'XDG_CACHE_HOME',
+  'XDG_DATA_HOME',
+  // Proxy (upper- and lowercase variants)
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'ALL_PROXY',
+  'NO_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'all_proxy',
+  'no_proxy',
+  // Windows basics Chrome needs
+  'SYSTEMROOT',
+  'COMSPEC',
+  'PATHEXT',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'PROGRAMFILES',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'SYSTEMDRIVE',
+];
+
+/** Filter env down to the default allowlist plus configured extras, minus the blocklist. */
+export function buildSubprocessEnv(
+  env: Record<string, string | undefined>,
+  extraAllowlist?: string[],
+  extraBlocklist?: string[],
+): Record<string, string> {
+  const allowed = new Set([
+    ...DEFAULT_ENV_ALLOWLIST,
+    ...(extraAllowlist ?? []).map((name) => name.trim()).filter(Boolean),
+  ]);
+  const blocked = new Set((extraBlocklist ?? []).map((name) => name.trim()).filter(Boolean));
+  const filtered: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (value !== undefined && allowed.has(name) && !blocked.has(name)) filtered[name] = value;
+  }
+  return filtered;
+}
 
 const DEFAULTS: Partial<BrowserUseConfig> = {
   sessionMode: 'persistent',

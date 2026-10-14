@@ -36,7 +36,12 @@ const EXCLUDED_TOOLS = new Set([
   'trigger_extension_action',
   'uninstall_extension',
 ]);
-const ARRAY_CONFIG_KEYS = new Set(['allowedUrlPattern', 'blockedUrlPattern']);
+const ARRAY_CONFIG_KEYS = new Set([
+  'allowedUrlPattern',
+  'blockedUrlPattern',
+  'envAllowlist',
+  'envBlocklist',
+]);
 
 export function parseArgs(argv: string[]): BrowserUseConfig {
   const config: BrowserUseConfig = {};
@@ -46,8 +51,19 @@ export function parseArgs(argv: string[]): BrowserUseConfig {
     const arg = argv[i]!;
 
     if (arg === '--config' && argv[i + 1] != null) {
-      const raw = readFileSync(argv[i + 1]!, 'utf-8');
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const configPath = argv[i + 1]!;
+      let raw: string;
+      try {
+        raw = readFileSync(configPath, 'utf-8');
+      } catch {
+        throw new Error(`Cannot read config file: ${configPath}`);
+      }
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        throw new Error(`Invalid JSON in config file: ${configPath}`);
+      }
       const section = (parsed['pi-browser-use'] ?? parsed) as BrowserUseConfig;
       Object.assign(config, section);
       i += 2;

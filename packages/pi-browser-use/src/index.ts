@@ -18,6 +18,7 @@ import {
 import {
   type BrowserSessionMode,
   type BrowserUseConfig,
+  buildSubprocessEnv,
   configToArgs,
   resolveConfig,
   type VisionModelConfig,
@@ -156,8 +157,9 @@ export class DevToolsClient {
 
       const transport = new StdioClientTransport({
         command: process.env.PI_BROWSER_USE_NODE?.trim() || process.execPath,
-        // SDK default env strips display/proxy vars a headful Chrome needs.
-        env: process.env as Record<string, string>,
+        // SDK default env strips display/proxy vars a headful Chrome needs;
+        // the allowlist passes those without inheriting unrelated secrets.
+        env: buildSubprocessEnv(process.env, this.config.envAllowlist),
         args: [resolveChromeDevToolsMcpEntrypoint(), ...args],
         stderr: 'pipe',
       });
