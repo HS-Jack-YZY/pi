@@ -1,4 +1,4 @@
-import { describe, expect, it, test } from 'vitest';
+import { afterEach, describe, expect, it, test, vi } from 'vitest';
 import {
   buildSubprocessEnv,
   configToArgs,
@@ -7,6 +7,23 @@ import {
 } from '../config.js';
 
 describe('buildSubprocessEnv', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('matches Windows names case-insensitively and masks SDK canonical keys', () => {
+    vi.stubGlobal('process', { ...process, platform: 'win32' });
+    const env = buildSubprocessEnv(
+      { Path: '/bin', SystemRoot: 'C:\\Windows', ComSpec: 'cmd.exe', MyToken: 'secret' },
+      ['mytoken'],
+      ['pAtH', 'MYTOKEN'],
+    );
+    expect(env).toStrictEqual({
+      PATH: undefined,
+      SYSTEMROOT: 'C:\\Windows',
+      COMSPEC: 'cmd.exe',
+      MYTOKEN: undefined,
+    });
+  });
+
   it('keeps default-allowlisted vars and strips the rest', () => {
     const env = buildSubprocessEnv({
       PATH: '/usr/bin',

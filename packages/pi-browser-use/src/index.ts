@@ -157,9 +157,12 @@ export class DevToolsClient {
 
       const transport = new StdioClientTransport({
         command: process.env.PI_BROWSER_USE_NODE?.trim() || process.execPath,
-        // SDK default env strips display/proxy vars a headful Chrome needs;
-        // the allowlist passes those without inheriting unrelated secrets.
-        env: buildSubprocessEnv(process.env, this.config.envAllowlist),
+        // SDK types omit the undefined values Node supports for overriding inherited defaults.
+        env: buildSubprocessEnv(
+          process.env,
+          this.config.envAllowlist,
+          this.config.envBlocklist,
+        ) as Record<string, string>,
         args: [resolveChromeDevToolsMcpEntrypoint(), ...args],
         stderr: 'pipe',
       });

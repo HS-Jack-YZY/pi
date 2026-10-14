@@ -120,15 +120,17 @@ export function buildSubprocessEnv(
   env: Record<string, string | undefined>,
   extraAllowlist?: string[],
   extraBlocklist?: string[],
-): Record<string, string> {
-  const allowed = new Set([
-    ...DEFAULT_ENV_ALLOWLIST,
-    ...(extraAllowlist ?? []).map((name) => name.trim()).filter(Boolean),
-  ]);
-  const blocked = new Set((extraBlocklist ?? []).map((name) => name.trim()).filter(Boolean));
-  const filtered: Record<string, string> = {};
+): Record<string, string | undefined> {
+  const normalize = (name: string) => (process.platform === 'win32' ? name.toUpperCase() : name);
+  const allowed = new Set(
+    [...DEFAULT_ENV_ALLOWLIST, ...(extraAllowlist ?? [])].map((name) => normalize(name.trim())),
+  );
+  const blocked = new Set((extraBlocklist ?? []).map((name) => normalize(name.trim())));
+  const filtered: Record<string, string | undefined> = {};
   for (const [name, value] of Object.entries(env)) {
-    if (value !== undefined && allowed.has(name) && !blocked.has(name)) filtered[name] = value;
+    // Undefined overrides SDK defaults and is omitted by Node when spawning.
+    const key = normalize(name);
+    filtered[key] = allowed.has(key) && !blocked.has(key) ? value : undefined;
   }
   return filtered;
 }

@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { once } from 'node:events';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { buildSubprocessEnv } from '../config.js';
 import { DevToolsClient } from '../index.js';
 
 const originalExecPath = process.execPath;
@@ -6,8 +9,44 @@ const originalPath = process.env.PATH;
 
 describe('DevToolsClient real stdio transport', () => {
   afterEach(() => {
+    vi.unstubAllEnvs();
     process.execPath = originalExecPath;
     process.env.PATH = originalPath;
+  });
+
+  it('enforces allowlists and blocklists in the actual subprocess environment', async () => {
+    vi.stubEnv('DISPLAY', ':42');
+    vi.stubEnv('SHELL', 'must-not-inherit');
+    vi.stubEnv('MY_ALLOWED_VAR', 'explicitly-allowed');
+    vi.stubEnv('MY_BLOCKED_VAR', 'must-not-inherit');
+    vi.stubEnv('SECRET_API_TOKEN', 'must-not-inherit');
+    const transport = new StdioClientTransport({
+      command: originalExecPath,
+      args: [
+        '-e',
+        `console.error(JSON.stringify(Object.fromEntries(
+          ['PATH', 'DISPLAY', 'SHELL', 'MY_ALLOWED_VAR', 'MY_BLOCKED_VAR', 'SECRET_API_TOKEN']
+            .map(name => [name, process.env[name]])
+        ))); process.stdin.resume();`,
+      ],
+      env: buildSubprocessEnv(
+        process.env,
+        ['MY_ALLOWED_VAR', 'MY_BLOCKED_VAR'],
+        ['PATH', 'MY_BLOCKED_VAR'],
+      ) as Record<string, string>,
+      stderr: 'pipe',
+    });
+    const output = once(transport.stderr!, 'data');
+    try {
+      await transport.start();
+      const [chunk] = await output;
+      expect(JSON.parse(String(chunk))).toEqual({
+        DISPLAY: ':42',
+        MY_ALLOWED_VAR: 'explicitly-allowed',
+      });
+    } finally {
+      await transport.close();
+    }
   });
 
   it('preserves a real spawn error code when the Node executable is missing', async () => {

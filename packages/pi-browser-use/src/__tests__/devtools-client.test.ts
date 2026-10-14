@@ -137,6 +137,7 @@ describe('DevToolsClient', () => {
 
     it('passes only allowlisted host environment to the MCP subprocess', async () => {
       vi.stubEnv('DISPLAY', ':0');
+      vi.stubEnv('TZ', 'Asia/Shanghai');
       vi.stubEnv('SECRET_API_TOKEN', 'do-not-send');
       vi.stubEnv('MY_EXTRA_VAR', 'explicitly-allowed');
 
