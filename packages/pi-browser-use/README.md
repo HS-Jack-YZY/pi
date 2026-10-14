@@ -29,7 +29,7 @@ Requires Node.js `^20.19.0 || ^22.12.0 || >=23`, Chrome (stable or newer), and `
 
 Hosts where `process.execPath` is not a directly executable Node runtime can set `PI_BROWSER_USE_NODE` to the Node command used for the MCP subprocess.
 
-The MCP subprocess inherits the extension's full process environment rather than the MCP SDK's minimal default, so a headful Chrome can attach to the active Linux graphical session (`DISPLAY`, `XAUTHORITY`, ...) and honors settings carried by environment, such as proxy variables.
+The MCP subprocess receives an allowlisted subset of the extension's environment rather than the MCP SDK's minimal default, so a headful Chrome can attach to the active Linux graphical session (`DISPLAY`, `XAUTHORITY`, ...) and honors settings carried by environment, such as proxy variables. Secrets and unrelated variables are not passed; extend the subset with `envAllowlist` or remove entries with `envBlocklist`, which takes precedence over both the default list and `envAllowlist`.
 
 ## Usage
 
@@ -103,6 +103,8 @@ npx @amaster.ai/pi-browser-use --config path/to/config.json
 | `userDataDir` | `string` | — | Custom user data directory |
 | `autoConnect` | `boolean` | `false` | Auto-connect to running browser |
 | `acceptInsecureCerts` | `boolean` | `false` | Ignore invalid or self-signed certificate errors; use with caution |
+| `envAllowlist` | `string[]` | — | Extra env var names the MCP subprocess may inherit, on top of the built-in allowlist (`PATH`, `HOME`, `DISPLAY`, `XAUTHORITY`, proxy variables, ...). Everything else is stripped, so secrets in the host environment stay out of the subprocess |
+| `envBlocklist` | `string[]` | — | Env var names the MCP subprocess must never receive; wins over the built-in allowlist and `envAllowlist` |
 
 ### Categories
 

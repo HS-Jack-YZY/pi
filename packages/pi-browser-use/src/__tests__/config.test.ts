@@ -1,5 +1,63 @@
-import { describe, expect, it, test } from 'vitest';
-import { configToArgs, resolveConfig } from '../config.js';
+import { afterEach, describe, expect, it, test, vi } from 'vitest';
+import {
+  buildSubprocessEnv,
+  configToArgs,
+  DEFAULT_ENV_ALLOWLIST,
+  resolveConfig,
+} from '../config.js';
+
+describe('buildSubprocessEnv', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('matches Windows names case-insensitively and masks SDK canonical keys', () => {
+    vi.stubGlobal('process', { ...process, platform: 'win32' });
+    const env = buildSubprocessEnv(
+      { Path: '/bin', SystemRoot: 'C:\\Windows', ComSpec: 'cmd.exe', MyToken: 'secret' },
+      ['mytoken'],
+      ['pAtH', 'MYTOKEN'],
+    );
+    expect(env).toStrictEqual({
+      PATH: undefined,
+      SYSTEMROOT: 'C:\\Windows',
+      COMSPEC: 'cmd.exe',
+      MYTOKEN: undefined,
+    });
+  });
+
+  it('keeps default-allowlisted vars and strips the rest', () => {
+    const env = buildSubprocessEnv({
+      PATH: '/usr/bin',
+      DISPLAY: ':0',
+      SECRET_API_TOKEN: 's3cret',
+    });
+    expect(env).toEqual({ PATH: '/usr/bin', DISPLAY: ':0' });
+  });
+
+  it('drops undefined values and blank extra names', () => {
+    const env = buildSubprocessEnv({ HOME: '/home/u', SKIP: undefined }, ['', '  ']);
+    expect(env).toEqual({ HOME: '/home/u' });
+  });
+
+  it('extends the default allowlist with configured extras', () => {
+    const env = buildSubprocessEnv({ HOME: '/home/u', MY_TOKEN: 't' }, ['MY_TOKEN']);
+    expect(env).toEqual({ HOME: '/home/u', MY_TOKEN: 't' });
+    expect(DEFAULT_ENV_ALLOWLIST).toContain('DISPLAY');
+  });
+
+  it('drops blocklisted vars even when default- or extra-allowlisted', () => {
+    const env = buildSubprocessEnv(
+      { HOME: '/home/u', HTTP_PROXY: 'http://p:1', MY_TOKEN: 't' },
+      ['MY_TOKEN'],
+      ['HTTP_PROXY', 'MY_TOKEN'],
+    );
+    expect(env).toEqual({ HOME: '/home/u' });
+  });
+
+  it('ignores blank blocklist entries', () => {
+    const env = buildSubprocessEnv({ HOME: '/home/u' }, [], ['', '  ']);
+    expect(env).toEqual({ HOME: '/home/u' });
+  });
+});
 
 describe('resolveConfig', () => {
   it('enables page ID routing and network header redaction by default', () => {

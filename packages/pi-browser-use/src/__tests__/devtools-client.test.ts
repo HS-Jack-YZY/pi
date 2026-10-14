@@ -135,15 +135,21 @@ describe('DevToolsClient', () => {
       }
     });
 
-    it('passes the host environment through to the MCP subprocess', async () => {
+    it('passes only allowlisted host environment to the MCP subprocess', async () => {
       vi.stubEnv('DISPLAY', ':0');
+      vi.stubEnv('TZ', 'Asia/Shanghai');
+      vi.stubEnv('SECRET_API_TOKEN', 'do-not-send');
+      vi.stubEnv('MY_EXTRA_VAR', 'explicitly-allowed');
 
-      const client = new DevToolsClient();
+      const client = new DevToolsClient({ envAllowlist: ['MY_EXTRA_VAR'], envBlocklist: ['TZ'] });
       await client.connect();
 
       const env = mockTransports[0]!.opts!.env ?? {};
       expect(env.DISPLAY).toBe(':0');
       expect(env.PATH).toBe(process.env.PATH);
+      expect(env.MY_EXTRA_VAR).toBe('explicitly-allowed');
+      expect(env.SECRET_API_TOKEN).toBeUndefined();
+      expect(env.TZ).toBeUndefined();
     });
 
     it('preserves an allowlisted MCP subprocess error code when startup fails', async () => {

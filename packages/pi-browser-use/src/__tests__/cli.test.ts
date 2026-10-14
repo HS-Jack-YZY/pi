@@ -48,6 +48,24 @@ describe('parseArgs', () => {
     expect(config.allowedUrlPattern).toEqual(['https://one.example/*', 'https://two.example/*']);
   });
 
+  it('collects repeated env-allowlist flags into arrays', () => {
+    const config = parseArgs(['--env-allowlist=FOO', '--env-allowlist=BAR']);
+
+    expect(config.envAllowlist).toEqual(['FOO', 'BAR']);
+  });
+
+  it('collects repeated env-blocklist flags into arrays', () => {
+    const config = parseArgs(['--env-blocklist=FOO', '--env-blocklist=BAR']);
+
+    expect(config.envBlocklist).toEqual(['FOO', 'BAR']);
+  });
+
+  it('reports a clear error for a missing config file', () => {
+    expect(() => parseArgs(['--config', '/definitely-missing/config.json'])).toThrow(
+      'Cannot read config file: /definitely-missing/config.json',
+    );
+  });
+
   test('--headless produces boolean true', () => {
     const config = parseArgs(['--headless']);
     expect(config.headless).toBe(true);
