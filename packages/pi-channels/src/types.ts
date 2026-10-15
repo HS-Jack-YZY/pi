@@ -72,6 +72,8 @@ export type FeishuAdapterConfig = AdapterConfig & {
   respondToMentionsOnly?: boolean;
   respondToMentionAll?: boolean;
   replyInThread?: boolean;
+  /** Defaults to Markdown cards with readable table expansion and text fallback. */
+  renderMode?: 'markdown' | 'text';
   ackReactionEmoji?: string | false;
   allowedChatIds?: string[];
   allowedSenderIds?: string[];

@@ -71,12 +71,308 @@ describe('Feishu adapter', () => {
     mockRequest.mockResolvedValue({ data: { code: 0 } });
   });
 
+  it('renders Markdown replies and expands tables into readable records', async () => {
+    const adapter = createFeishuAdapter({
+      type: 'feishu',
+      appId: 'cli_xxx',
+      appSecret: 'secret',
+      eventMode: 'off',
+    });
+    await adapter.send?.({
+      adapter: 'feishu',
+      recipient: 'oc_chat',
+      text: '**结果**\n\n| 股票 | bonus |\n| :--- | ---: |\n| 中兴 600851 | +5.66 |',
+      metadata: { messageId: 'om_inbound', threadId: 'omt_thread' },
+    });
+    expect(mockReplyMessage).toHaveBeenCalledWith({
+      path: { message_id: 'om_inbound' },
+      data: {
+        msg_type: 'interactive',
+        content: JSON.stringify({
+          elements: [{ tag: 'markdown', content: '**结果**\n\n股票：中兴 600851\nbonus：+5.66' }],
+        }),
+        reply_in_thread: true,
+      },
+    });
+  });
+
+  it('renders sourced messages sent directly to an explicit recipient', async () => {
+    const adapter = createFeishuAdapter({
+      type: 'feishu',
+      appId: 'id',
+      appSecret: 'secret',
+      eventMode: 'off',
+    });
+    await adapter.send?.({
+      adapter: 'feishu',
+      recipient: 'open_id:ou_user',
+      source: 'agent',
+      text: '# Title\n**bold**',
+    });
+    expect(mockCreateMessage).toHaveBeenCalledWith({
+      params: { receive_id_type: 'open_id' },
+      data: {
+        receive_id: 'ou_user',
+        msg_type: 'interactive',
+        content: JSON.stringify({
+          elements: [{ tag: 'markdown', content: '[agent]\n# Title\n**bold**' }],
+        }),
+      },
+    });
+  });
+
+  it.each([false, true])('falls back on logical card rejection (reply=%s)', async (reply) => {
+    const log = vi.fn();
+    const request = reply ? mockReplyMessage : mockCreateMessage;
+    request.mockResolvedValueOnce({ code: 230099, msg: 'untrusted response' });
+    const adapter = createFeishuAdapter(
+      { type: 'feishu', appId: 'id', appSecret: 'secret', eventMode: 'off', replyInThread: false },
+      { log },
+    );
+    await adapter.send?.({
+      adapter: 'feishu',
+      recipient: 'oc_chat',
+      text: '# Title\n**bold**\n| name | score |\n| --- | --- |\n| 张三 | 5 |',
+      metadata: reply ? { messageId: 'om_inbound', threadId: 'omt_thread' } : {},
+    });
+    const data = request.mock.calls[1]![0].data;
+    expect(data.msg_type).toBe('text');
+    expect(JSON.parse(data.content)).toEqual({ text: 'Title\nbold\nname：张三\nscore：5' });
+    if (reply) expect(data.reply_in_thread).toBe(false);
+    expect(log).toHaveBeenCalledExactlyOnceWith('feishu-render-fallback', { code: 230099 }, 'WARN');
+  });
+
+  it('reports failure when both card and text are rejected without leaking provider messages', async () => {
+    mockCreateMessage.mockResolvedValue({ code: 230001, msg: 'secret response' });
+    const adapter = createFeishuAdapter({
+      type: 'feishu',
+      appId: 'id',
+      appSecret: 'secret',
+      eventMode: 'off',
+    });
+    await expect(
+      adapter.send?.({ adapter: 'feishu', recipient: 'oc_chat', text: '**result**' }),
+    ).rejects.toThrow('Feishu send failed (code 230001)');
+    expect(mockCreateMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry an ambiguous network failure that may already have delivered the card', async () => {
+    mockCreateMessage.mockRejectedValue(new Error('private network error'));
+    const log = vi.fn();
+    const adapter = createFeishuAdapter(
+      { type: 'feishu', appId: 'id', appSecret: 'secret', eventMode: 'off' },
+      { log },
+    );
+    await expect(
+      adapter.send?.({ adapter: 'feishu', recipient: 'oc_chat', text: 'hello' }),
+    ).rejects.toThrow('Feishu message request failed');
+    expect(mockCreateMessage).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith('feishu-send-failed', {}, 'ERROR');
+  });
+
+  it('skips oversized cards using UTF-8 bytes, retaining the full text', async () => {
+    const text = '中'.repeat(10000);
+    const adapter = createFeishuAdapter({
+      type: 'feishu',
+      appId: 'id',
+      appSecret: 'secret',
+      eventMode: 'off',
+    });
+    await adapter.send?.({ adapter: 'feishu', recipient: 'oc_chat', text });
+    expect(mockCreateMessage).toHaveBeenCalledExactlyOnceWith({
+      params: { receive_id_type: 'chat_id' },
+      data: { receive_id: 'oc_chat', msg_type: 'text', content: JSON.stringify({ text }) },
+    });
+  });
+
+  it.each([
+    [
+      '```text\n| a | b |\n| --- | --- |\n| 1 | 2 |\n```',
+      '```text\n| a | b |\n| --- | --- |\n| 1 | 2 |\n```',
+    ],
+    [
+      '~~~\n| a | b |\n| --- | --- |\n| 1 | 2 |\n~~~',
+      '~~~\n| a | b |\n| --- | --- |\n| 1 | 2 |\n~~~',
+    ],
+    [
+      '````\n```\n| a | b |\n| --- | --- |\n| 1 | 2 |\n````',
+      '````\n```\n| a | b |\n| --- | --- |\n| 1 | 2 |\n````',
+    ],
+    ['a | b\n:---: | ---:\nx | y\nz |', 'a：x\nb：y\n\na：z\nb：'],
+    ['| a | b |\n| --- | --- |\n| `x|y` | z |', 'a：`x|y`\nb：z'],
+    ['| a | b |\n| --- | --- |\n| x\\|y | z |', 'a：x\\|y\nb：z'],
+    ['| a |\n| --- |\n| 中 |', 'a：中'],
+    ['| a | b |\n| --- | --- |\n| x | y | z |', 'a：x\nb：y\n3：z'],
+  ])('preserves code and table data: %s', async (text, expected) => {
+    const adapter = createFeishuAdapter({
+      type: 'feishu',
+      appId: 'id',
+      appSecret: 'secret',
+      eventMode: 'off',
+    });
+    await adapter.send?.({ adapter: 'feishu', recipient: 'oc_chat', text });
+    expect(JSON.parse(mockCreateMessage.mock.calls[0]![0].data.content)).toEqual({
+      elements: [{ tag: 'markdown', content: expected }],
+    });
+  });
+
+  it('keeps code intact when falling back to plain text', async () => {
+    mockCreateMessage.mockResolvedValueOnce({ code: 230099 });
+    const adapter = createFeishuAdapter({
+      type: 'feishu',
+      appId: 'id',
+      appSecret: 'secret',
+      eventMode: 'off',
+    });
+    await adapter.send?.({
+      adapter: 'feishu',
+      recipient: 'oc_chat',
+      text: '**result**\n```\n# comment **literal**\n| a | b |\n| --- | --- |\n```',
+    });
+    expect(JSON.parse(mockCreateMessage.mock.calls[1]![0].data.content)).toEqual({
+      text: 'result\n# comment **literal**\n| a | b |\n| --- | --- |',
+    });
+  });
+
+  it('preserves literal inline code in readable text fallback', async () => {
+    mockCreateMessage.mockResolvedValueOnce({ code: 230099 });
+    const adapter = createFeishuAdapter({
+      type: 'feishu',
+      appId: 'id',
+      appSecret: 'secret',
+      eventMode: 'off',
+    });
+    await adapter.send?.({
+      adapter: 'feishu',
+      recipient: 'oc_chat',
+      text: '**Result**: `obj.__dict__` and `a**b**c` and `[x](y)`',
+    });
+    expect(JSON.parse(mockCreateMessage.mock.calls[1]![0].data.content)).toEqual({
+      text: 'Result: obj.__dict__ and a**b**c and [x](y)',
+    });
+  });
+
+  it('treats unmatched backticks in table cells as literal data', async () => {
+    const adapter = createFeishuAdapter({
+      type: 'feishu',
+      appId: 'id',
+      appSecret: 'secret',
+      eventMode: 'off',
+    });
+    await adapter.send?.({
+      adapter: 'feishu',
+      recipient: 'oc_chat',
+      text: '| a | b |\n| --- | --- |\n| x` | y |',
+    });
+    expect(JSON.parse(mockCreateMessage.mock.calls[0]![0].data.content)).toEqual({
+      elements: [{ tag: 'markdown', content: 'a：x`\nb：y' }],
+    });
+  });
+
+  it.each([false, true])('falls back on explicit HTTP card rejection (reply=%s)', async (reply) => {
+    const request = reply ? mockReplyMessage : mockCreateMessage;
+    request.mockRejectedValueOnce({
+      response: { status: 400, data: { code: 230099, msg: 'private provider response' } },
+    });
+    const adapter = createFeishuAdapter({
+      type: 'feishu',
+      appId: 'id',
+      appSecret: 'secret',
+      eventMode: 'off',
+    });
+    await adapter.send?.({
+      adapter: 'feishu',
+      recipient: 'oc_chat',
+      text: '**result**',
+      metadata: reply ? { messageId: 'om_inbound' } : {},
+    });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls[1]![0].data.msg_type).toBe('text');
+  });
+
+  it.each([
+    { status: 500, data: { code: 230099 } },
+    { status: 400, data: { code: 0 } },
+    { status: 400, data: { code: '230099' } },
+    { status: 400, data: 'private response' },
+  ])('does not retry ambiguous HTTP failures: %j', async (response) => {
+    mockCreateMessage.mockRejectedValueOnce({ response });
+    const adapter = createFeishuAdapter({
+      type: 'feishu',
+      appId: 'id',
+      appSecret: 'secret',
+      eventMode: 'off',
+    });
+    await expect(
+      adapter.send?.({ adapter: 'feishu', recipient: 'oc_chat', text: '**result**' }),
+    ).rejects.toThrow('Feishu message request failed');
+    expect(mockCreateMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not begin a send after cancellation', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const adapter = createFeishuAdapter({
+      type: 'feishu',
+      appId: 'id',
+      appSecret: 'secret',
+      eventMode: 'off',
+    });
+    await expect(
+      adapter.send?.(
+        { adapter: 'feishu', recipient: 'oc_chat', text: '**result**' },
+        controller.signal,
+      ),
+    ).rejects.toThrow();
+    expect(mockCreateMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not start the fallback when cancelled during the card request', async () => {
+    const controller = new AbortController();
+    mockCreateMessage.mockImplementationOnce(async () => {
+      controller.abort();
+      return { code: 230099 };
+    });
+    const adapter = createFeishuAdapter({
+      type: 'feishu',
+      appId: 'id',
+      appSecret: 'secret',
+      eventMode: 'off',
+    });
+    await expect(
+      adapter.send?.(
+        { adapter: 'feishu', recipient: 'oc_chat', text: '**result**' },
+        controller.signal,
+      ),
+    ).rejects.toThrow();
+    expect(mockCreateMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves intraword underscores and escaped punctuation in fallback text', async () => {
+    mockCreateMessage.mockResolvedValueOnce({ code: 230099 });
+    const adapter = createFeishuAdapter({
+      type: 'feishu',
+      appId: 'id',
+      appSecret: 'secret',
+      eventMode: 'off',
+    });
+    await adapter.send?.({
+      adapter: 'feishu',
+      recipient: 'oc_chat',
+      text: 'foo__bar__baz and **bold** and __bold__ and \\**literal** and \\[x](y)',
+    });
+    expect(JSON.parse(mockCreateMessage.mock.calls[1]![0].data.content)).toEqual({
+      text: 'foo__bar__baz and bold and bold and **literal** and [x](y)',
+    });
+  });
+
   test('sends a text message with official SDK Client.im.message.create', async () => {
     const adapter = createFeishuAdapter({
       type: 'feishu',
       appId: 'cli_xxx',
       appSecret: 'secret',
       eventMode: 'off',
+      renderMode: 'text',
     });
 
     await adapter.send?.({
@@ -102,6 +398,7 @@ describe('Feishu adapter', () => {
       appId: 'cli_xxx',
       appSecret: 'secret',
       eventMode: 'off',
+      renderMode: 'text',
     });
 
     await adapter.send?.({
@@ -126,6 +423,7 @@ describe('Feishu adapter', () => {
       appId: 'cli_xxx',
       appSecret: 'secret',
       eventMode: 'off',
+      renderMode: 'text',
     });
 
     await adapter.send?.({

@@ -14,7 +14,7 @@ Put the `pi-channels` section in `~/.pi/agent/settings.json`, the configured age
 
 ## Channels
 
-- `feishu` - Native Feishu/Lark app messaging backed by the official `@larksuiteoapi/node-sdk`. Supports outgoing text messages, WebSocket events by default, HTTP event callbacks as a fallback, and incoming text, post, and image messages. Incoming images are downloaded to a temporary file and passed to the Pi bridge as image input; the Feishu app must be allowed to download message resources.
+- `feishu` - Native Feishu/Lark app messaging backed by the official `@larksuiteoapi/node-sdk`. Supports outgoing Markdown cards with readable table expansion and plain-text fallback, WebSocket events by default, HTTP event callbacks as a fallback, and incoming text, post, and image messages. Incoming images are downloaded to a temporary file and passed to the Pi bridge as image input; the Feishu app must be allowed to download message resources.
 - `wecom` - Native WeCom intelligent bot messaging backed by the official
   `@wecom/aibot-node-sdk`. Supports WebSocket long connection events and active
   Markdown pushes with Bot ID / Secret credentials.
@@ -125,6 +125,8 @@ Use HTTP callback mode when the deployment already exposes a Feishu event URL. T
   }
 }
 ```
+
+Outgoing messages use interactive Markdown cards by default (`"renderMode": "markdown"`), for both direct sends and replies. GFM tables are expanded into one record per row, with each cell labeled by its column heading; this avoids unsupported table syntax and mixed CJK/Latin alignment problems. Fenced code blocks are preserved. Cards larger than 28,000 serialized UTF-8 bytes skip directly to readable text. If Feishu returns a nonzero business code for a card (including an explicit HTTP 4xx rejection), the adapter logs `feishu-render-fallback` and retries once as readable plain text. A rejected text send is reported as an error; ambiguous transport or HTTP 5xx failures are not retried because delivery may already have succeeded. Cancellation is checked before each send attempt; the SDK does not expose an in-flight request cancellation option. Set `"renderMode": "text"` to retain the original verbatim plain-text behavior.
 
 Set `"eventMode": "off"` for outgoing-only usage.
 
