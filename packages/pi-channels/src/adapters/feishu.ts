@@ -15,6 +15,8 @@ import type {
   OnIncomingMessage,
 } from '../types.js';
 
+import { buildFeishuPost, renderFeishuPlainText } from './feishu-render.js';
+
 type ReceiveIdType = 'chat_id' | 'open_id' | 'user_id' | 'union_id' | 'email';
 type FeishuEventMode = 'websocket' | 'http' | 'off';
 
@@ -450,7 +452,7 @@ export function createFeishuAdapter(
     }
   }
 
-  async function sendText(message: ChannelMessage): Promise<void> {
+  async function sendText(message: ChannelMessage, signal?: AbortSignal): Promise<void> {
     if (!message.text) throw new Error('Feishu adapter requires text');
     const text = message.source ? `[${message.source}]\n${message.text}` : message.text;
 
@@ -460,32 +462,63 @@ export function createFeishuAdapter(
         : typeof message.metadata?.replyToMessageId === 'string'
           ? message.metadata.replyToMessageId
           : undefined;
-    if (replyToMessageId) {
-      const response = await client.im.message.reply({
-        path: { message_id: replyToMessageId },
-        data: {
-          msg_type: 'text',
-          content: JSON.stringify({ text }),
-          reply_in_thread: cfg.replyInThread ?? Boolean(message.metadata?.threadId),
-        },
-      });
-      if (response.code !== 0) {
-        throw new Error(`Feishu reply error: ${response.msg ?? response.code ?? 'unknown'}`);
+    const send = async (msgType: string, content: string) => {
+      if (signal?.aborted) throw new Error('Feishu message send cancelled');
+      try {
+        if (replyToMessageId) {
+          return await client.im.message.reply({
+            path: { message_id: replyToMessageId },
+            data: {
+              msg_type: msgType,
+              content,
+              reply_in_thread: cfg.replyInThread ?? Boolean(message.metadata?.threadId),
+            },
+          });
+        }
+        const { receiveIdType, receiveId } = resolveReceiveId(message, defaultReceiveIdType);
+        return await client.im.message.create({
+          params: { receive_id_type: receiveIdType },
+          data: { receive_id: receiveId, msg_type: msgType, content },
+        });
+      } catch (error) {
+        const response = (
+          error as { response?: { status?: unknown; data?: { code?: unknown } } } | null
+        )?.response;
+        // Explicit 4xx business errors mean rejection; transport/5xx delivery is ambiguous.
+        if (
+          typeof response?.status === 'number' &&
+          response.status >= 400 &&
+          response.status < 500 &&
+          typeof response.data?.code === 'number' &&
+          response.data.code !== 0
+        ) {
+          return { code: response.data.code };
+        }
+        context.log?.('feishu-send-failed', {}, 'ERROR');
+        throw new Error('Feishu message request failed');
       }
-      return;
-    }
+    };
 
-    const { receiveIdType, receiveId } = resolveReceiveId(message, defaultReceiveIdType);
-    const response = await client.im.message.create({
-      params: { receive_id_type: receiveIdType },
-      data: {
-        receive_id: receiveId,
-        msg_type: 'text',
-        content: JSON.stringify({ text }),
-      },
-    });
+    const usePost =
+      cfg.renderMode !== 'text' &&
+      /(^ {0,3}(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|---+\s*$))|[`*_~|]|\[[^\]]+\]\([^)]+\)/m.test(text);
+    if (usePost) {
+      const response = await send('post', JSON.stringify(buildFeishuPost(text)));
+      if (response.code === 0) return;
+      context.log?.('feishu-render-fallback', { code: response.code }, 'WARN');
+    }
+    const response = await send(
+      'text',
+      JSON.stringify({
+        text: usePost ? renderFeishuPlainText(text) : text,
+      }),
+    );
     if (response.code !== 0) {
-      throw new Error(`Feishu send error: ${response.msg ?? response.code ?? 'unknown'}`);
+      throw new Error(
+        `Feishu ${replyToMessageId ? 'reply' : 'send'} failed (code ${
+          typeof response.code === 'number' ? response.code : 'unknown'
+        })`,
+      );
     }
   }
 
