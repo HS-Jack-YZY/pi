@@ -72,7 +72,7 @@ export type FeishuAdapterConfig = AdapterConfig & {
   respondToMentionsOnly?: boolean;
   respondToMentionAll?: boolean;
   replyInThread?: boolean;
-  /** Defaults to Markdown cards with readable table expansion and text fallback. */
+  /** Defaults to Markdown post/md messages, with readable text fallback on rejection. */
   renderMode?: 'markdown' | 'text';
   ackReactionEmoji?: string | false;
   allowedChatIds?: string[];

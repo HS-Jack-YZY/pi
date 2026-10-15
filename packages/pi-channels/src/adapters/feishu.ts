@@ -15,7 +15,7 @@ import type {
   OnIncomingMessage,
 } from '../types.js';
 
-import { renderFeishuText } from './feishu-render.js';
+import { buildFeishuPost, renderFeishuPlainText } from './feishu-render.js';
 
 type ReceiveIdType = 'chat_id' | 'open_id' | 'user_id' | 'union_id' | 'email';
 type FeishuEventMode = 'websocket' | 'http' | 'off';
@@ -499,21 +499,18 @@ export function createFeishuAdapter(
       }
     };
 
-    if (cfg.renderMode !== 'text') {
-      const content = JSON.stringify({
-        elements: [{ tag: 'markdown', content: renderFeishuText(text) }],
-      });
-      // Leave headroom below Feishu's card limit, measured in serialized UTF-8 bytes.
-      if (Buffer.byteLength(content, 'utf8') <= 28_000) {
-        const response = await send('interactive', content);
-        if (response.code === 0) return;
-        context.log?.('feishu-render-fallback', { code: response.code }, 'WARN');
-      }
+    const usePost =
+      cfg.renderMode !== 'text' &&
+      /(^ {0,3}(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|---+\s*$))|[`*_~|]|\[[^\]]+\]\([^)]+\)/m.test(text);
+    if (usePost) {
+      const response = await send('post', JSON.stringify(buildFeishuPost(text)));
+      if (response.code === 0) return;
+      context.log?.('feishu-render-fallback', { code: response.code }, 'WARN');
     }
     const response = await send(
       'text',
       JSON.stringify({
-        text: cfg.renderMode === 'text' ? text : renderFeishuText(text, true),
+        text: usePost ? renderFeishuPlainText(text) : text,
       }),
     );
     if (response.code !== 0) {

@@ -57,30 +57,54 @@ function plainText(text: string): string {
   return result + stripFormatting(text.slice(cursor));
 }
 
-/** Feishu Markdown has no GFM tables: expand rows without display-width assumptions. */
-export function renderFeishuText(text: string, plain = false): string {
+function markdownFence(line: string, fence: string | undefined): string | undefined {
+  const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+  if (!marker) return fence;
+  const delimiter = marker[1]!;
+  const suffix = marker[2]!;
+  if (fence)
+    return delimiter[0] === fence[0] && delimiter.length >= fence.length && !suffix.trim()
+      ? undefined
+      : fence;
+  return delimiter.startsWith('`') && suffix.includes('`') ? undefined : delimiter;
+}
+
+/** Keep each fenced block in its own md row so Feishu does not swallow trailing prose. */
+export function buildFeishuPost(text: string) {
+  const rows: { tag: 'md'; text: string }[][] = [];
+  let current: string[] = [];
+  let fence: string | undefined;
+  const flush = () => {
+    const segment = current.join('\n');
+    if (segment.trim()) rows.push([{ tag: 'md', text: segment }]);
+    current = [];
+  };
+  for (const line of text.split('\n')) {
+    const nextFence = markdownFence(line, fence);
+    if (!fence && nextFence) flush();
+    current.push(line);
+    if (fence && !nextFence) flush();
+    fence = nextFence;
+  }
+  flush();
+  return { zh_cn: { content: rows.length ? rows : [[{ tag: 'md', text }]] } };
+}
+
+/** Expand tables only for the plain-text fallback, without display-width assumptions. */
+export function renderFeishuPlainText(text: string): string {
   const lines = text.split(/\r?\n/);
   const output: string[] = [];
   let fence: string | undefined;
-  const format = plain ? plainText : (value: string) => value;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
-    const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    const nextFence = markdownFence(line, fence);
     if (fence) {
-      if (
-        marker &&
-        marker[1]![0] === fence[0] &&
-        marker[1]!.length >= fence.length &&
-        !marker[2]!.trim()
-      ) {
-        fence = undefined;
-        if (!plain) output.push(line);
-      } else output.push(line);
+      if (nextFence) output.push(line);
+      fence = nextFence;
       continue;
     }
-    if (marker) {
-      fence = marker[1]!;
-      if (!plain) output.push(line);
+    if (nextFence) {
+      fence = nextFence;
       continue;
     }
     const header = cells(line);
@@ -105,16 +129,14 @@ export function renderFeishuText(text: string, plain = false): string {
           Array.from(
             { length: Math.max(header.length, row.length) },
             (_, column) =>
-              `${format(header[column] || String(column + 1))}：${format(row[column] ?? '')}`,
+              `${plainText(header[column] || String(column + 1))}：${plainText(row[column] ?? '')}`,
           ).join('\n'),
         );
       }
-      output.push(rows.length ? rows.join('\n\n') : header.map(format).join(' / '));
+      output.push(rows.length ? rows.join('\n\n') : header.map(plainText).join(' / '));
       continue;
     }
-    output.push(
-      format(plain ? line.replace(/^ {0,3}#{1,6}\s+/, '').replace(/^ {0,3}>\s?/, '') : line),
-    );
+    output.push(plainText(line.replace(/^ {0,3}#{1,6}\s+/, '').replace(/^ {0,3}>\s?/, '')));
   }
   return output.join('\n');
 }
