@@ -224,6 +224,8 @@ describe('Feishu adapter', () => {
 
   it.each([
     ['前文\n```ts\nconst x = 1;\n```\n后文', ['前文', '```ts\nconst x = 1;\n```', '后文']],
+    ['前文\r\n```ts\r\nconst x = 1;\r\n```\r\n后文', ['前文', '```ts\nconst x = 1;\n```', '后文']],
+    ['前文\r\n~~~text\r\ncode\r\n~~~\r\n后文', ['前文', '~~~text\ncode\n~~~', '后文']],
     [
       '前文\n~~~text\n| a | b |\n| --- | --- |\n~~~\n后文',
       ['前文', '~~~text\n| a | b |\n| --- | --- |\n~~~', '后文'],

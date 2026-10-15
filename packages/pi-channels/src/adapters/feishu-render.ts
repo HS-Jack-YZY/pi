@@ -79,7 +79,7 @@ export function buildFeishuPost(text: string) {
     if (segment.trim()) rows.push([{ tag: 'md', text: segment }]);
     current = [];
   };
-  for (const line of text.split('\n')) {
+  for (const line of text.split(/\r?\n/)) {
     const nextFence = markdownFence(line, fence);
     if (!fence && nextFence) flush();
     current.push(line);
