@@ -345,6 +345,7 @@ Rules:
 
 ## GitHub Issues and Pull Requests
 
+- All authored GitHub content MUST be written in English when creating or updating issues, pull requests, comments, reviews, or discussions, including titles, bodies, and review comments. Preserve exact code, identifiers, logs, and source quotations when needed as evidence.
 - Before drafting or opening an issue, read and follow `.github/ISSUE_TEMPLATE/issue.md`; before drafting or opening a pull request, read and follow `.github/pull_request_template.md`.
 - Keep titles specific and bodies brief. Include only the context needed to understand, reproduce, or review the work; link to longer logs or design notes instead of copying them.
 - Issues should identify the affected package and version when applicable, then state the problem or motivation, expected outcome, and minimal reproduction or context. Omit sections that do not apply.
