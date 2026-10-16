@@ -24,8 +24,12 @@ export { loadConfigFromFile, resolveConfig };
 
 const TOOL_PREFIX = 'computer_use_';
 
-const PERCEPTION_INSTALL_GUIDANCE =
-  "Optional local perception is not bundled and is only needed for OCR/icon regions. On not_installed, continue with accessibility, browser state, or screenshot reasoning unless local parsing is needed. To install on demand, select a cua-perception-v* release from https://github.com/trycua/cua/releases and check its assets for native OS/CPU support and compatibility with the installed Driver. Download the signed catalog and matching archive into the same directory. Use the configured cua-driver binary or resolve the bundled path with resolveDriverLayout({mode: 'bundled'}).binaryPath exported by @amaster.ai/pi-computer-use, with the same user and CUA_DRIVER_RS_HOME as Pi: run `cua-driver extension inspect cua-perception --catalog <catalog.json>`, review publisher, target, size and licenses, then install within user authorization using `cua-driver extension install cua-perception --catalog <catalog.json>` and verify `cua-driver extension status cua-perception --self-test`. Keep signature verification enabled. The running Driver detects the installation on the next parse. The MCP install_extension tool only uses a local catalog configured via CUA_DRIVER_PERCEPTION_CATALOG at daemon launch; it does not download artifacts.";
+const OPTIONAL_EXTENSION_HINTS: Record<string, string> = {
+  parse_visual_regions:
+    'Requires optional Perception. If not_installed, use accessibility/browser state or screenshot reasoning, or consult computer_use_install_extension.',
+  install_extension:
+    'Uses a local signed catalog; does not download artifacts. On-demand setup: https://github.com/TGYD-helige/pi/blob/master/packages/pi-computer-use/README.md#optional-local-perception',
+};
 
 const HIGH_RISK_TOOLS = new Set([
   'browser_download',
@@ -398,10 +402,9 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
                   : ('deferred' as const),
             }
           : {}),
-        description:
-          originalName === 'parse_visual_regions' || originalName === 'install_extension'
-            ? `${tool.description ?? ''} ${PERCEPTION_INSTALL_GUIDANCE}`
-            : (tool.description ?? ''),
+        description: [tool.description, OPTIONAL_EXTENSION_HINTS[originalName]]
+          .filter(Boolean)
+          .join(' '),
         parameters: Type.Unsafe(sanitizeSchemaFormats(tool.inputSchema) as object),
         async execute(
           _toolCallId: string,
