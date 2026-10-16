@@ -108,6 +108,18 @@ describe('toPiToolResult', () => {
 
     it.each([
       [
+        'install_extension',
+        {
+          version: '0.2.1',
+          target: 'aarch64-apple-darwin',
+          trust: 'publisher-verified',
+          license: 'LicenseRef-Mixed',
+          download_size: 426075949,
+          installed: false,
+        },
+        ['0.2.1', 'aarch64-apple-darwin', 'publisher-verified', 'LicenseRef-Mixed', '426075949'],
+      ],
+      [
         'browser_dialog',
         { present: true, dialog_id: 'dialog-12', kind: 'confirm' },
         ['dialog-12', 'confirm'],
@@ -422,6 +434,21 @@ describe('toPiToolResult', () => {
       );
       const text = result.content.map((c) => ('text' in c ? c.text : '')).join('\n');
       expect(text).toContain('capture_id=capture-123');
+    });
+
+    it('does not report a missing tree for an unchanged incremental read', () => {
+      const result = toPiToolResult(
+        {
+          content: [{ type: 'text', text: 'no change since s1' }],
+          structuredContent: {
+            snapshot_id: 's2',
+            element_count: 10,
+            tree_diff: 'no change since s1',
+          },
+        },
+        'get_window_state',
+      );
+      expect(JSON.stringify(result.content)).not.toContain('AX tree is not in the text above');
     });
 
     it('does not report a missing tree when a large tree is fully retained', () => {

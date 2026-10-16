@@ -1,5 +1,6 @@
 const { piVersion } = vi.hoisted(() => ({ piVersion: { value: '1.2.0' } }));
 
+import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { mkdtemp, realpath, rename, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -63,6 +64,7 @@ let mockCallTool: (
   content: [{ type: 'text', text: 'Action executed.' }],
 });
 let mockLiveTools: readonly LiveTool[] = toolManifest.tools;
+let lastTransportOptions: Record<string, unknown> | undefined;
 let lastRequestOptions: Record<string, unknown> | undefined;
 let lastTransport: { onclose?: () => void; onerror?: (error: Error) => void } | undefined;
 let closeCount = 0;
@@ -98,7 +100,8 @@ vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => ({
   StdioClientTransport: class MockTransport {
     onclose?: () => void;
     onerror?: (error: Error) => void;
-    constructor() {
+    constructor(options: Record<string, unknown>) {
+      lastTransportOptions = options;
       lastTransport = this;
     }
   },
@@ -255,7 +258,7 @@ describe('computerUseExtension', () => {
     expect(tools.has('computer_use_screenshot')).toBe(false);
   });
 
-  it('declares the visual parser kinds union as an explicit array for model providers', async () => {
+  it('declares the visual parser kinds as an explicit string array for model providers', async () => {
     await start();
 
     expect(tools.get('computer_use_parse_visual_regions')?.parameters).toMatchObject({
@@ -263,15 +266,39 @@ describe('computerUseExtension', () => {
         options: {
           properties: {
             kinds: {
-              anyOf: [
-                { type: 'array', items: { type: 'string', enum: ['text', 'icon'] } },
-                { type: 'null' },
-              ],
+              type: 'array',
+              items: { type: 'string', enum: ['text', 'icon'] },
             },
           },
         },
       },
     });
+  });
+
+  it('passes the optional extension catalog and store to the macOS daemon and proxy', async () => {
+    vi.stubEnv('CUA_DRIVER_PERCEPTION_CATALOG', '/reviewed/catalog.json');
+    vi.stubEnv('CUA_DRIVER_RS_HOME', '/isolated/driver-home');
+    try {
+      await start();
+      await tools.get('computer_use_get_config')!.execute('id', {}, undefined, undefined, mockCtx);
+      const launch = vi
+        .mocked(spawn)
+        .mock.calls.findLast(([command]) => command === '/usr/bin/open');
+      expect(launch?.[1]).toEqual(
+        expect.arrayContaining([
+          '--env',
+          'CUA_DRIVER_PERCEPTION_CATALOG=/reviewed/catalog.json',
+          '--env',
+          'CUA_DRIVER_RS_HOME=/isolated/driver-home',
+        ]),
+      );
+      expect(lastTransportOptions?.env).toMatchObject({
+        CUA_DRIVER_PERCEPTION_CATALOG: '/reviewed/catalog.json',
+        CUA_DRIVER_RS_HOME: '/isolated/driver-home',
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('does not start the macOS driver to discover its live schema', async () => {
@@ -783,6 +810,18 @@ describe('computerUseExtension', () => {
     expect(lastRequestOptions?.signal).toBe(controller.signal);
   });
 
+  it.each([
+    ['run_script', 125_000],
+    ['run_steps', 65_000],
+  ] as const)('allows the full %s runtime while preserving cancellation', async (name, timeout) => {
+    await start({ confirmAppLaunch: false, confirmDangerousActions: false });
+    const controller = new AbortController();
+    await tools
+      .get(`computer_use_${name}`)!
+      .execute('id', {}, controller.signal, undefined, mockCtx);
+    expect(lastRequestOptions).toMatchObject({ signal: controller.signal, timeout });
+  });
+
   it('reconnects after the MCP transport closes', async () => {
     let connects = 0;
     mockConnect = async () => {
@@ -1188,6 +1227,27 @@ describe('computerUseExtension', () => {
     expect(invoked).toBe(false);
   });
 
+  it('requires script approval when app launch confirmation is enabled', async () => {
+    await start({ confirmDangerousActions: false, confirmAppLaunch: true });
+    mockCtx.ui.confirm.mockResolvedValueOnce(false);
+    const invoked = vi.fn(() => ({ content: [] }));
+    mockCallTool = invoked;
+
+    const result = (await tools
+      .get('computer_use_run_script')!
+      .execute(
+        'id',
+        { script: 'await cua.launch("Calculator")' },
+        undefined,
+        undefined,
+        mockCtx,
+      )) as any;
+
+    expect(invoked).not.toHaveBeenCalled();
+    expect(mockCtx.ui.confirm).toHaveBeenCalledOnce();
+    expect(result.isError).toBe(true);
+  });
+
   it('does not invoke a high-risk tool when confirmation is declined', async () => {
     let invoked = false;
     mockCtx.ui.confirm.mockResolvedValueOnce(false);
@@ -1206,7 +1266,12 @@ describe('computerUseExtension', () => {
     expect(result.content[0].text).toContain('requires interactive user confirmation');
   });
 
-  it.each(['clipboard_read', 'clipboard_write'])('confirms the new %s capability', async (name) => {
+  it.each([
+    'clipboard_read',
+    'clipboard_write',
+    'run_steps',
+    'run_script',
+  ])('confirms the new %s capability', async (name) => {
     let invoked = false;
     mockCtx.ui.confirm.mockResolvedValueOnce(false);
     await start();
@@ -1362,6 +1427,14 @@ describe('computerUseExtension', () => {
       expect(active).toContain('computer_use_browser_click');
       expect(active).toContain('computer_use_browser_navigate');
       expect(active).not.toContain('computer_use_start_recording');
+    });
+
+    it('activates batch tools through the automation group', async () => {
+      await start();
+      expect(mockPi.getActiveTools()).not.toContain('computer_use_run_script');
+      await commands.get('computer-use-tools')!.handler('automation', mockCtx);
+      expect(mockPi.getActiveTools()).toContain('computer_use_run_script');
+      expect(mockPi.getActiveTools()).toContain('computer_use_run_steps');
     });
 
     it('activates optional extensions and visual parsing through diagnostics', async () => {

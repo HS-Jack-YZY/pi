@@ -30,6 +30,10 @@ export const CORE_TOOLS: readonly string[] = [
 ];
 
 export const TOOL_GROUPS: Readonly<Record<string, ToolGroup>> = {
+  automation: {
+    summary: 'Batch native actions and sandboxed JavaScript automation',
+    tools: ['run_steps', 'run_script'],
+  },
   browser: {
     summary: 'CDP browser automation: prepare, navigate, click, type, dialogs, downloads',
     tools: [
