@@ -98,7 +98,7 @@ jobs:
           fi
 
   computer-use-platform-e2e:
-    name: Computer use driver E2E (${{ matrix.target }})
+    name: Computer use driver and perception E2E (${{ matrix.target }})
     needs: detect-extension-matrix
     if: contains(needs.detect-extension-matrix.outputs.matrix, 'pi-computer-use')
     timeout-minutes: 20
@@ -107,9 +107,14 @@ jobs:
       matrix:
         include:
           - target: darwin-universal
+            perception_target: darwin-arm64
             runner: macos-15
           - target: win32-x64
+            perception_target: win32-x64
             runner: windows-2025
+          - target: linux-x64
+            perception_target: linux-x64
+            runner: ubuntu-22.04
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
@@ -127,16 +132,38 @@ jobs:
           dest: ${{ runner.temp }}/setup-pnpm
       - run: pnpm install --frozen-lockfile
         shell: bash
+      - name: Install Linux display and Driver libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb xauth libx11-6 libxi6 libxtst6 libxext6 libwayland-client0 libxkbcommon0
       - name: Fetch verified Cua Driver runtime
         run: node packages/pi-computer-use/scripts/fetch-driver.mjs ${{ matrix.target }}
+        shell: bash
+      - name: Fetch verified Cua Perception artifacts
+        run: node packages/pi-computer-use/scripts/fetch-perception.mjs ${{ matrix.perception_target }}
         shell: bash
       - run: pnpm --filter @amaster.ai/pi-shared build
         shell: bash
       - run: pnpm --filter @amaster.ai/pi-computer-use build
         shell: bash
       - name: Exercise driver daemon and MCP lifecycle
-        run: node tests/computer-use-driver-e2e.mjs
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a node .github/scripts/computer-use-driver-e2e.mjs
+          else
+            node .github/scripts/computer-use-driver-e2e.mjs
+          fi
         shell: bash
+
+      - name: Verify packaged perception installation and real OCR
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a node .github/scripts/computer-use-perception-e2e.mjs
+          else
+            node .github/scripts/computer-use-perception-e2e.mjs
+          fi
 
   # ──────────────────────────────────────────────────────────────────────
   integration-approval:
@@ -639,7 +666,7 @@ jobs:
       - name: Verify computer-use daemon follows abrupt owner exit
         if: matrix.extension == 'pi-computer-use' && runner.os == 'Linux'
         run: |
-          node tests/computer-use-owner-exit.mjs
+          node .github/scripts/computer-use-owner-exit.mjs
 
       - name: Compose preview video (pi-video-gen only)
         if: matrix.extension == 'pi-video-gen'
