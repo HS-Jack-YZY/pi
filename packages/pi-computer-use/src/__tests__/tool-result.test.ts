@@ -43,7 +43,354 @@ describe('toPiToolResult', () => {
     );
   });
 
+  it.each([1996, 1997, 1998])('counts separators between text blocks after %i rows', (rows) => {
+    const result = toPiToolResult({
+      content: [
+        { type: 'text', text: 'row\n'.repeat(rows) },
+        { type: 'text', text: 'tail\n'.repeat(100) },
+      ],
+    });
+    const text = result.content.map((item) => ('text' in item ? item.text : '')).join('\n');
+    expect(text.split('\n').length).toBeLessThanOrEqual(DEFAULT_MAX_LINES);
+  });
+
+  it('counts text block wrappers within the aggregate byte limit', () => {
+    const result = toPiToolResult(
+      {
+        content: Array.from({ length: 1990 }, () => ({ type: 'text', text: 'x' })),
+        structuredContent: Object.fromEntries(
+          Array.from({ length: 10 }, (_, i) => [`field${i}`, 'x'.repeat(2500)]),
+        ),
+      },
+      'get_config',
+    );
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(DEFAULT_MAX_BYTES);
+  });
+
   describe('model-visible enrichment', () => {
+    it.each([
+      {
+        snapshot_id: 'p7',
+        refs: [{ ref: 'p7:0', node: 'BUTTON', label: 'Pay', frame: 'main' }],
+      },
+      {
+        snapshot: { id: 'p7', format: 'semantic_v2', complete: false, continuation: 'bc-next' },
+        refs: [{ ref: 'p7:0', role: 'button', name: 'Pay', actions: ['click'] }],
+        content_refs: [{ ref: 'p7:1', role: 'paragraph', name: 'Order summary' }],
+        outline: 'Order summary: total 12.00',
+      },
+    ])('exposes browser snapshot references and semantic content: %j', (snapshot) => {
+      const structuredContent = {
+        status: 'ok',
+        mode: 'snapshot',
+        target_id: 'bt-123',
+        tab_id: 'tab-456',
+        ...snapshot,
+      };
+      const result = toPiToolResult(
+        {
+          content: [{ type: 'text', text: 'snapshot p7: 1 interactive element(s)' }],
+          structuredContent,
+        },
+        'get_browser_state',
+      );
+      const text = result.content.map((item) => ('text' in item ? item.text : '')).join('\n');
+      expect(text).toContain('tab-456');
+      expect(text).toContain('p7:0');
+      expect(text).toContain('Pay');
+      if ('content_refs' in snapshot) {
+        expect(text).toContain('p7:1');
+        expect(text).toContain('Order summary: total 12.00');
+        expect(text).toContain('bc-next');
+      }
+      expect(result.details).toEqual(structuredContent);
+    });
+
+    it.each([
+      [
+        'browser_dialog',
+        { present: true, dialog_id: 'dialog-12', kind: 'confirm' },
+        ['dialog-12', 'confirm'],
+      ],
+      [
+        'browser_prepare',
+        {
+          prepared_pid: 12345,
+          attachment: { next_action: 'retry_browser_prepare', relaunch_required: true },
+        },
+        ['12345', 'retry_browser_prepare'],
+      ],
+      [
+        'parse_visual_regions',
+        {
+          capture: {
+            capture_id: 'capture-123',
+            action_coordinate_space: { type: 'affine', m11: 0.5, m22: 0.5, tx: 4, ty: 8 },
+          },
+          regions: [
+            {
+              id: 'r1',
+              kind: 'text',
+              text: 'Submit',
+              bounds: { x: 10, y: 20, width: 30, height: 40 },
+            },
+          ],
+          warnings: ['low confidence'],
+        },
+        ['capture-123', 'Submit', 'bounds', 'action_coordinate_space', 'low confidence'],
+      ],
+      [
+        'get_session',
+        { session: 'checkout', state: 'active', expires_in_seconds: 120, recording_active: true },
+        ['checkout', 'expires_in_seconds', 'recording_active'],
+      ],
+      [
+        'get_session_state',
+        { session: 'checkout', desktop_unlocked: false },
+        ['checkout', 'desktop_unlocked', 'false'],
+      ],
+      [
+        'list_sessions',
+        { sessions: [{ session: 'checkout', state: 'active' }], next_cursor: 'o:1' },
+        ['checkout', 'o:1'],
+      ],
+      [
+        'get_config',
+        { version: '0.34.0', max_image_dimension: 1560, agent_cursor: { enabled: false } },
+        ['1560', 'agent_cursor', 'false'],
+      ],
+      [
+        'get_agent_cursor_state',
+        { enabled: false, theme: { id: 'my-theme' }, position: { x: 5, y: 8 } },
+        ['my-theme', 'position', 'false'],
+      ],
+      [
+        'verify_state',
+        {
+          status: 'unknown',
+          stable: false,
+          predicates: [{ index: 0, status: 'unknown', unknown_reason: 'stability_unproven' }],
+        },
+        ['stable', 'predicates', 'stability_unproven'],
+      ],
+    ] as const)('exposes structured results from %s', (toolName, structuredContent, expected) => {
+      const result = toPiToolResult(
+        { content: [{ type: 'text', text: 'Summary only.' }], structuredContent },
+        toolName,
+      );
+      const text = result.content.map((item) => ('text' in item ? item.text : '')).join('\n');
+      for (const value of expected) expect(text).toContain(value);
+      expect(result.details).toEqual(structuredContent);
+    });
+
+    it('preserves opaque capabilities and all snapshot sections under large output', () => {
+      const continuation = `bc-${'opaque'.repeat(100)}`;
+      const structuredContent = {
+        mode: 'snapshot',
+        target_id: 'bt-123',
+        tab_id: 'tab-456',
+        snapshot: { id: 'p7', format: 'semantic_v2', complete: false, continuation },
+        refs: Array.from({ length: 100 }, (_, index) => ({
+          ref: `p7:${index}`,
+          name: '界'.repeat(10_000),
+          actions: ['click'],
+        })),
+        content_refs: [{ ref: 'p7:100', name: 'Article content' }],
+        outline: 'Readable page text',
+      };
+      const result = toPiToolResult(
+        {
+          content: [
+            { type: 'text', text: 'row\n'.repeat(4000) },
+            { type: 'image', data: 'image-base64', mimeType: 'image/png' },
+          ],
+          structuredContent,
+        },
+        'get_browser_state',
+      );
+      const text = result.content.map((item) => ('text' in item ? item.text : '')).join('\n');
+      for (const value of [continuation, 'p7:0', 'p7:100', 'Readable page text', 'truncated'])
+        expect(text).toContain(value);
+      expect(text.split('\n').length).toBeLessThanOrEqual(DEFAULT_MAX_LINES);
+      expect(
+        Buffer.byteLength(
+          JSON.stringify({
+            ...result,
+            content: result.content.filter((item) => item.type === 'text'),
+          }),
+        ),
+      ).toBeLessThanOrEqual(DEFAULT_MAX_BYTES);
+      expect(result.content.some((item) => item.type === 'image')).toBe(true);
+    });
+
+    it('preserves visual transforms and later regions when OCR text is long', () => {
+      const result = toPiToolResult(
+        {
+          structuredContent: {
+            capture: {
+              capture_id: 'capture-123',
+              action_coordinate_space: { type: 'affine', m11: 0.5, m22: 0.5, tx: 4, ty: 8 },
+            },
+            regions: [
+              {
+                id: 'r1',
+                text: '界'.repeat(10_000),
+                bounds: { x: 10, y: 20, width: 30, height: 40 },
+              },
+              { id: 'r2', label: 'Submit', bounds: { x: 50, y: 60, width: 30, height: 40 } },
+            ],
+          },
+        },
+        'parse_visual_regions',
+      );
+      const text = result.content.map((item) => ('text' in item ? item.text : '')).join('\n');
+      for (const value of ['action_coordinate_space', '0.5', 'r1', 'r2', 'Submit', 'bounds'])
+        expect(text).toContain(value);
+    });
+
+    it('warns against skipping locally omitted session records', () => {
+      const result = toPiToolResult(
+        {
+          structuredContent: {
+            next_cursor: 'o:100',
+            sessions: Array.from({ length: 100 }, (_, index) => ({
+              session: `session-${index}`,
+              state: 'active',
+            })),
+          },
+        },
+        'list_sessions',
+      );
+      const text = result.content.map((item) => ('text' in item ? item.text : '')).join('\n');
+      expect(text).toContain('o:100');
+      expect(text).toContain('session-0');
+      expect(text).toContain('smaller limit');
+      expect(text).toContain('do not use next_cursor');
+    });
+
+    it('keeps structured fields visible when matching original text is truncated away', () => {
+      const result = toPiToolResult(
+        {
+          content: [{ type: 'text', text: `${'row\n'.repeat(4000)}max_image_dimension:\n1560` }],
+          structuredContent: { max_image_dimension: 1560 },
+        },
+        'get_config',
+      );
+      const text = result.content.map((item) => ('text' in item ? item.text : '')).join('\n');
+      expect(text).toContain('1560');
+      expect(text.split('\n').length).toBeLessThanOrEqual(DEFAULT_MAX_LINES);
+    });
+
+    it('does not duplicate already visible JSON configuration', () => {
+      const structuredContent = { max_image_dimension: 1560, agent_cursor: { enabled: false } };
+      const text = `✅ ${JSON.stringify(structuredContent, null, 2)}`;
+      const result = toPiToolResult(
+        { content: [{ type: 'text', text }], structuredContent },
+        'get_config',
+      );
+      expect(result.content).toEqual([{ type: 'text', text }]);
+    });
+
+    it('does not expose structured error diagnostics through new enrichment', () => {
+      const result = toPiToolResult(
+        {
+          content: [{ type: 'text', text: 'Request refused.' }],
+          isError: true,
+          structuredContent: { raw: 'private diagnostic' },
+        },
+        'get_config',
+      );
+      expect(result.content).toEqual([{ type: 'text', text: 'Request refused.' }]);
+      expect(result.isError).toBe(true);
+    });
+
+    it('exposes browser target and tab IDs from a bind response to the model', () => {
+      const structuredContent = {
+        status: 'ok',
+        mode: 'bind',
+        target_id: 'bt-123',
+        tabs: [
+          { tab_id: 'tab-456', title: 'Example', url: 'https://example.com', active: true },
+          { tab_id: 'tab-789', title: 'Other', url: 'https://other.example', active: false },
+        ],
+      };
+      const result = toPiToolResult(
+        {
+          content: [{ type: 'text', text: 'bound target bt-123 (exact) with 2 tab(s)' }],
+          structuredContent,
+        },
+        'get_browser_state',
+      );
+      const text = result.content.map((item) => ('text' in item ? item.text : '')).join('\n');
+      expect(text).toContain('target_id=bt-123');
+      expect(text).toContain('tab_id=tab-456');
+      expect(text).toContain('tab_id=tab-789');
+      expect(text).toContain('https://example.com');
+      expect(result.details).toEqual(structuredContent);
+    });
+
+    it('keeps later tab IDs visible when an earlier tab has a long title and URL', () => {
+      const result = toPiToolResult(
+        {
+          content: [{ type: 'text', text: 'bound target bt-123' }],
+          structuredContent: {
+            target_id: 'bt-123',
+            tabs: [
+              { tab_id: 'tab-long', title: 'x'.repeat(10_000), url: 'y'.repeat(10_000) },
+              { tab_id: 'tab-later', title: 'Example', url: 'https://example.com' },
+            ],
+          },
+        },
+        'get_browser_state',
+      );
+      const text = result.content.map((item) => ('text' in item ? item.text : '')).join('\n');
+      expect(text).toContain('tab_id=tab-long');
+      expect(text).toContain('tab_id=tab-later');
+    });
+
+    it('does not duplicate browser IDs already included in driver text', () => {
+      const text = 'target_id=bt-123 tab_id=tab-456';
+      const result = toPiToolResult(
+        {
+          content: [{ type: 'text', text }],
+          structuredContent: { target_id: 'bt-123', tabs: [{ tab_id: 'tab-456' }] },
+        },
+        'get_browser_state',
+      );
+      expect(result.content).toEqual([{ type: 'text', text }]);
+    });
+
+    it('bounds large browser tab lists and ignores malformed tab records', () => {
+      const result = toPiToolResult(
+        {
+          content: [{ type: 'text', text: 'bound target bt-123' }],
+          structuredContent: {
+            target_id: 'bt-123',
+            tabs: [
+              null,
+              {},
+              { tab_id: 42 },
+              ...Array.from({ length: 200 }, (_, index) => ({
+                tab_id: `tab-${index}`,
+                title: 'Example'.repeat(30),
+                url: 'https://example.com',
+                active: index === 199,
+              })),
+            ],
+          },
+        },
+        'get_browser_state',
+      );
+      const text = result.content.map((item) => ('text' in item ? item.text : '')).join('\n');
+      expect(text).toContain('target_id=bt-123');
+      expect(text).toContain('tab_id=tab-199');
+      expect(text).not.toContain('tab_id=42');
+      expect(Buffer.byteLength(JSON.stringify(result), 'utf8')).toBeLessThanOrEqual(
+        DEFAULT_MAX_BYTES,
+      );
+      expect(text.split('\n').length).toBeLessThanOrEqual(DEFAULT_MAX_LINES);
+    });
+
     it('exposes actual element tokens on their matching tree rows', () => {
       const result = toPiToolResult(
         {
@@ -75,6 +422,20 @@ describe('toPiToolResult', () => {
       );
       const text = result.content.map((c) => ('text' in c ? c.text : '')).join('\n');
       expect(text).toContain('capture_id=capture-123');
+    });
+
+    it('does not report a missing tree when a large tree is fully retained', () => {
+      const tree = Array.from({ length: 300 }, (_, i) => `- [${i}] AXButton`).join('\n');
+      const result = toPiToolResult(
+        {
+          content: [{ type: 'text', text: tree }],
+          structuredContent: { element_count: 300 },
+        },
+        'get_window_state',
+      );
+      const text = result.content.map((item) => ('text' in item ? item.text : '')).join('\n');
+      expect(text).toContain('- [299] AXButton');
+      expect(text).not.toContain('AX tree is not in the text above');
     });
 
     it('preserves snapshot addressing within the total line budget', () => {

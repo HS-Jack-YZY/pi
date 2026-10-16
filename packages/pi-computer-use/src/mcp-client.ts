@@ -119,7 +119,7 @@ export async function waitForDaemonStatus(
   checkStatus: () => Promise<unknown> = () =>
     execFileAsync(binaryPath, ['status', '--socket', socket], {
       signal,
-      timeout: 250,
+      timeout: DAEMON_START_TIMEOUT_MS,
       windowsHide: true,
     }),
 ): Promise<void> {
@@ -217,7 +217,8 @@ const PROPERTY_MAP_KEYS = new Set([
 
 /**
  * Returns a copy of the schema with schemars' non-standard integer `format`
- * annotations ("uint64", ...) replaced by standard constraints ajv can enforce.
+ * annotations ("uint64", ...) replaced by standard constraints ajv can enforce,
+ * and string-only enums given the explicit type required by model providers.
  * The input schema is not modified.
  */
 export function sanitizeSchemaFormats<T>(schema: T): T {
@@ -235,6 +236,15 @@ function sanitizeSchemaNode(node: unknown): unknown {
   for (const [key, value] of Object.entries(node)) {
     result[key] = sanitizeSchemaValue(key, value);
   }
+
+  // String-only enums imply their type; providers such as Moonshot require it explicitly.
+  if (
+    result.type === undefined &&
+    Array.isArray(result.enum) &&
+    result.enum.length > 0 &&
+    result.enum.every((value) => typeof value === 'string')
+  )
+    result.type = 'string';
 
   const format = result.format;
   if (typeof format !== 'string') return result;

@@ -118,8 +118,9 @@ export function toPiToolResult(
     0,
     MAX_RESULT_BYTES - byteLength(details) - SERIALIZATION_OVERHEAD_BYTES - enrichmentBytes,
   );
-  let remainingLines = DEFAULT_MAX_LINES - (enrichment ? enrichment.split('\n').length : 0);
+  let remainingLines = DEFAULT_MAX_LINES - (enrichment ? enrichment.split('\n').length + 1 : 0);
 
+  const textBlockOverhead = byteLength({ type: 'text', text: '' }) - byteLength('') + 1;
   for (const item of result.content ?? []) {
     if (item.type === 'image' && item.data) {
       // Keep image blocks valid; Pi's image pipeline applies its own decode/resize
@@ -127,7 +128,14 @@ export function toPiToolResult(
       content.push({ type: 'image', data: item.data, mimeType: item.mimeType ?? 'image/png' });
       continue;
     }
-    if (item.type !== 'text' || !item.text || remainingBytes <= 0 || remainingLines <= 0) continue;
+    if (
+      item.type !== 'text' ||
+      !item.text ||
+      remainingBytes <= textBlockOverhead ||
+      remainingLines <= 0
+    )
+      continue;
+    remainingBytes -= textBlockOverhead;
 
     const sourceText = item.text.replace(
       /^([ \t]*- \[(\d+)\])(.*)$/gm,
@@ -146,7 +154,8 @@ export function toPiToolResult(
     const noticeCandidate = needsTruncation
       ? `\n\n[pi-computer-use truncated output: ${initial.totalBytes} bytes, ${initial.totalLines} lines]`
       : '';
-    const notice = byteLength(noticeCandidate) <= remainingBytes ? noticeCandidate : '';
+    const notice =
+      remainingLines >= 3 && byteLength(noticeCandidate) <= remainingBytes ? noticeCandidate : '';
     const textBudget = Math.max(0, remainingBytes - byteLength(notice));
     const text = `${fitSerializedString(
       sourceText,
@@ -156,7 +165,7 @@ export function toPiToolResult(
     if (!text) continue;
     content.push({ type: 'text', text });
     remainingBytes -= byteLength(text);
-    remainingLines -= text.split('\n').length;
+    remainingLines -= text.split('\n').length + 1;
   }
 
   if (enrichment) content.push({ type: 'text', text: enrichment });
@@ -181,8 +190,8 @@ export function toPiToolResult(
 // carries the field) and defensive (schema drift degrades to pass-through).
 // ---------------------------------------------------------------------------
 
-const ENRICHMENT_MAX_BYTES = 4 * 1024;
-const ENRICHMENT_MAX_LINES = 60;
+const ENRICHMENT_MAX_BYTES = 12 * 1024;
+const ENRICHMENT_MAX_LINES = 240;
 const LIST_WINDOWS_MAX_RECORDS = 20;
 // Matches the tree-row format the cua-driver 0.28.x MCP text output emits
 // ("- [N] <role> ..."). Undocumented upstream format; a false positive only
@@ -233,14 +242,143 @@ function formatWindowRecord(window: Record<string, unknown>): string | undefined
   return `window_id=${windowId} pid=${pid} ${app}${title}${geometry} ${flags}`.trim();
 }
 
+function structuredFieldLines(fields: Record<string, unknown>, existingText: string): string[] {
+  if (
+    existingText.includes(JSON.stringify(fields)) ||
+    existingText.includes(JSON.stringify(fields, null, 2))
+  )
+    return [];
+  const lines: string[] = [];
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === undefined) continue;
+    let shortened = false;
+    const rows = (Array.isArray(value) ? value : [value]).map((row) =>
+      JSON.stringify(row, (name, field) => {
+        const limit = key === 'outline' ? 512 : 120;
+        if (
+          ['name', 'title', 'label', 'text', 'value', 'url', 'outline'].includes(name || key) &&
+          typeof field === 'string' &&
+          field.length > limit
+        ) {
+          shortened = true;
+          return `${field.slice(0, limit)} [truncated]`;
+        }
+        return field;
+      }),
+    );
+    const text = rows.join('\n');
+    const bounded = fitSerializedString(text, 3 * 1024, 40);
+    const block = `${key}:\n${bounded}`;
+    if (existingText.includes(block)) continue;
+    lines.push(block);
+    if (shortened || bounded !== text) {
+      const hint =
+        key === 'sessions'
+          ? 'repeat list_sessions with a smaller limit; do not use next_cursor yet'
+          : 'narrow the request before continuing through omitted results';
+      lines.push(`[${key} truncated; ${hint}.]`);
+    }
+  }
+  return lines;
+}
+
 function buildEnrichment(toolName: string, result: McpToolResult): string | undefined {
   const sc = result.structuredContent;
   if (!sc || typeof sc !== 'object') return undefined;
-  const existingText = (result.content ?? [])
+  const originalText = (result.content ?? [])
     .filter((item) => item.type === 'text')
     .map((item) => item.text ?? '')
     .join('\n');
+  // Only suppress enrichment when the original text is small enough to survive truncation.
+  const existingText =
+    byteLength(originalText) < ENRICHMENT_MAX_BYTES &&
+    originalText.split('\n').length < ENRICHMENT_MAX_LINES
+      ? originalText
+      : '';
   const parts: string[] = [];
+
+  if (!result.isError) {
+    switch (toolName) {
+      case 'browser_prepare':
+        parts.push(
+          ...structuredFieldLines(
+            {
+              prepared_pid: sc.prepared_pid,
+              attachment: sc.attachment,
+              side_effects: sc.side_effects,
+            },
+            existingText,
+          ),
+        );
+        break;
+      case 'browser_dialog':
+        parts.push(
+          ...structuredFieldLines(
+            { dialog_id: sc.dialog_id, present: sc.present, kind: sc.kind },
+            existingText,
+          ),
+        );
+        break;
+      case 'parse_visual_regions':
+        parts.push(
+          ...structuredFieldLines(
+            { capture: sc.capture, warnings: sc.warnings, regions: sc.regions },
+            existingText,
+          ),
+        );
+        break;
+      case 'list_sessions':
+        parts.push(
+          ...structuredFieldLines(
+            { next_cursor: sc.next_cursor, sessions: sc.sessions },
+            existingText,
+          ),
+        );
+        break;
+      case 'get_session':
+      case 'get_session_state':
+      case 'get_config':
+      case 'get_agent_cursor_state':
+      case 'verify_state':
+        parts.push(...structuredFieldLines(sc, existingText));
+        break;
+    }
+  }
+
+  if (toolName === 'get_browser_state') {
+    if (typeof sc.target_id === 'string' && !existingText.includes(`target_id=${sc.target_id}`)) {
+      parts.push(`target_id=${sc.target_id}`);
+    }
+    if (sc.mode === 'snapshot') {
+      parts.push(
+        ...structuredFieldLines(
+          {
+            tab_id: sc.tab_id,
+            snapshot_id: sc.snapshot_id,
+            snapshot: sc.snapshot,
+            truncated: sc.truncated,
+            oopif: sc.oopif,
+            screenshot: sc.screenshot,
+            refs: sc.refs,
+            content_refs: sc.content_refs,
+            outline: sc.outline,
+          },
+          existingText,
+        ),
+      );
+    }
+    const tabs = asRecordArray(sc.tabs).sort(
+      (a, b) => Number(b.active === true) - Number(a.active === true),
+    );
+    for (const tab of tabs) {
+      if (typeof tab.tab_id !== 'string' || existingText.includes(`tab_id=${tab.tab_id}`)) continue;
+      const title = typeof tab.title === 'string' ? tab.title.slice(0, 120) : '';
+      const url = typeof tab.url === 'string' ? tab.url.slice(0, 200) : '';
+      parts.push(
+        `tab_id=${tab.tab_id} title=${JSON.stringify(title)} url=${JSON.stringify(url)} active=${tab.active === true}`,
+      );
+    }
+  }
 
   if (toolName === 'get_window_state' || toolName === 'get_desktop_state') {
     if (
@@ -269,7 +407,7 @@ function buildEnrichment(toolName: string, result: McpToolResult): string | unde
     const elementCount = typeof sc.element_count === 'number' ? sc.element_count : undefined;
     const elements = asRecordArray(sc.elements);
     if (
-      !TREE_LINE.test(existingText) &&
+      !TREE_LINE.test(originalText) &&
       ((elementCount !== undefined && elementCount > 0) || elements.length > 0)
     ) {
       parts.push(

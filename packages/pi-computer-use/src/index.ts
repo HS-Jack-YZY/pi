@@ -6,7 +6,7 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import { Type } from 'typebox';
 import { type ComputerUseConfig, loadConfigFromFile, resolveConfig } from './config.js';
 import toolManifest from './generated/cua-driver-tools.js';
-import { CuaDriverClient, waitForPromise } from './mcp-client.js';
+import { CuaDriverClient, sanitizeSchemaFormats, waitForPromise } from './mcp-client.js';
 import { CORE_TOOLS, TOOL_GROUP_NAMES, TOOL_GROUPS } from './tool-groups.js';
 import { type McpToolResult, toPiToolResult } from './tool-result.js';
 import { createPiVisionCaller } from './vision.js';
@@ -393,7 +393,7 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
             }
           : {}),
         description: tool.description ?? '',
-        parameters: Type.Unsafe(tool.inputSchema as object),
+        parameters: Type.Unsafe(sanitizeSchemaFormats(tool.inputSchema) as object),
         async execute(
           _toolCallId: string,
           params: Record<string, unknown>,
@@ -416,6 +416,45 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
 
           try {
             await ensureConnected(signal, originalName !== 'check_permissions');
+            if (
+              originalName.startsWith('browser_') &&
+              originalName !== 'browser_dialog' &&
+              originalName !== 'browser_prepare' &&
+              typeof params.target_id === 'string' &&
+              typeof params.tab_id === 'string'
+            ) {
+              // Subscribe before an action opens a modal; Page.enable can block once it is open.
+              const dialog = await client!.callTool(
+                'browser_dialog',
+                {
+                  target_id: params.target_id,
+                  tab_id: params.tab_id,
+                  session: params.session,
+                  action: 'inspect',
+                },
+                signal,
+              );
+              if (
+                dialog.isError ||
+                dialog.structuredContent?.status !== 'ok' ||
+                dialog.structuredContent.present !== false
+              ) {
+                const blocked = toPiToolResult(
+                  {
+                    ...dialog,
+                    content: [
+                      {
+                        type: 'text',
+                        text: `${originalName} was not executed. Resolve any current dialog with browser_dialog before retrying; dialog observation must be available.`,
+                      },
+                      ...(dialog.content ?? []),
+                    ],
+                  },
+                  'browser_dialog',
+                );
+                return { ...blocked, isError: true };
+              }
+            }
             const result = await client!.callTool(originalName, params, signal);
 
             if (result.isError) {

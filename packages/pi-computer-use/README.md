@@ -79,6 +79,25 @@ Activated groups stay active for the rest of the session; each new session start
 
 Pi hosts with native tool-discovery support expose driver tools under the `computer_use` namespace (alias `desktop`). Optional tools use `deferred` exposure under the `core` profile, so codemode can discover and call them and the built-in `tool_search` can activate them for direct use. On Pi 1.2, enable these built-ins with `pi --tools +codemode,+tool_search`; SDK hosts must load their corresponding built-in extension factories. Existing group activation, the `full` profile, and older-host behavior remain available. Deferred calls retain the same driver permissions, high-risk confirmations, cancellation, and host tool hooks as direct calls.
 
+After `get_browser_state({ pid, window_id })` binds a browser window, its bounded model-visible text includes `target_id` and tab records with `tab_id`, shortened title and URL, and active state. Active tabs appear first. Use the returned `target_id` and `tab_id` for subsequent browser calls; these IDs remain available in structured details as well.
+
+### Model-visible structured results
+
+The extension includes bounded structured results in model-visible text for these tools, so their data is available for the next action:
+
+| Tools | Model-visible data |
+| --- | --- |
+| `get_browser_state` | Bind IDs; snapshot action/content refs, semantic outline, snapshot continuation, frame limitations, and screenshot coordinate metadata |
+| `browser_prepare`, `browser_dialog` | Newly launched browser PID and attachment state; current dialog ID required for accept/dismiss |
+| `parse_visual_regions` | Capture identity, action-coordinate transform, region text/labels/bounds, and warnings |
+| `get_session`, `get_session_state`, `list_sessions` | Session state and records, including pagination cursor |
+| `get_config`, `get_agent_cursor_state` | Current configuration and cursor state |
+| `verify_state` | Stability and individual predicate outcomes, including unknown reasons |
+
+Long descriptive text and large lists are shortened with a truncation notice; opaque IDs and continuation tokens are never shortened. Narrow browser reads with `query` or `scope_ref` in `semantic_v2` when needed. If session records are omitted locally, repeat `list_sessions` with a smaller `limit` before using `next_cursor` to avoid skipping unseen records. Original structured results remain available in bounded details.
+
+Before typed browser actions such as navigation, clicks, typing, pointer input, file assignment, and downloads, the extension automatically inspects the exact tab's JavaScript dialog state. This establishes the driver's CDP dialog-event subscription before the action can open a modal, so callers do not need to manually inspect first. If a dialog is already open, the action is not dispatched and its current `dialog_id` is returned for `browser_dialog` to resolve. If a dialog opened before this driver ever subscribed and inspection times out, dismiss it manually once before retrying; the extension cannot recover that existing modal through the affected driver path.
+
 ### Optional vision model
 
 ```json
@@ -95,6 +114,8 @@ Pi hosts with native tool-discovery support expose driver tools under the `compu
 `computer_use_analyze_screenshot` requires both `pid` and `window_id`. It calls `get_window_state`, reuses the returned image, and invokes the configured model. Use it only when the primary model cannot resolve visual ambiguity.
 
 ## Runtime and permissions
+
+Windows daemon status probes allow up to 10 seconds per process invocation, so slow driver initialization is not interrupted after 250 ms. Session cancellation still aborts the probe.
 
 On macOS, `session_start` registers the generated 0.34.0 manifest without starting the driver. The signed app and MCP proxy start lazily on the first computer-use tool call, which requests any missing permissions through `check_permissions({ prompt: true })`. Existing grants do not raise another system dialog. The requested tool still runs and reports its own capability or permission error. Linux and Windows keep eager startup: they discover the exact live `tools/list` surface and call `check_permissions({})` (their schemas accept no parameters). If discovery fails, the extension registers `computer_use_connect` (and `/computer-use-connect`) so a later retry can install the exact live platform contract without advertising another OS's schemas.
 
