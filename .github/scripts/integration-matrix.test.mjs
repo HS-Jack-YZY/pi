@@ -45,7 +45,18 @@ test('runs the real Cua Driver MCP lifecycle on macOS and Windows', async () => 
   assert.match(job, /runner: windows-2025/);
   assert.match(job, /node packages\/pi-computer-use\/scripts\/fetch-driver\.mjs/);
   assert.match(job, /pnpm --filter @amaster\.ai\/pi-shared build/);
-  assert.match(job, /node tests\/computer-use-driver-e2e\.mjs/);
+  assert.match(job, /node \.github\/scripts\/computer-use-driver-e2e\.mjs/);
+});
+
+test('verifies perception installation and real inference on every supported target', async () => {
+  const workflow = await readFile(new URL('../workflows/integration.yml', import.meta.url), 'utf8');
+  const job = workflow.slice(workflow.indexOf('  computer-use-platform-e2e:'), workflow.indexOf('  integration-approval:'));
+  for (const target of ['darwin-arm64', 'linux-x64', 'win32-x64']) {
+    assert.ok(job.includes(`perception_target: ${target}`));
+  }
+  assert.match(job, /fetch-perception\.mjs \$\{\{ matrix\.perception_target \}\}/);
+  assert.match(job, /node \.github\/scripts\/computer-use-perception-e2e\.mjs/);
+  assert.match(job, /xvfb-run -a/);
 });
 
 test('runs model-backed computer-use E2E on Linux, macOS, and Windows', async () => {
@@ -164,7 +175,7 @@ test('routes companion packages and package-specific integration tests', () => {
     selectIntegrationMatrix(['.github/scripts/pi-memory-snapshot-e2e.mjs']).map(({ extension }) => extension),
     ['pi-memory'],
   );
-  for (const file of ['tests/computer-use-owner-exit.mjs', 'tests/computer-use-driver-e2e.mjs']) {
+  for (const file of ['tests/computer-use-owner-exit.mjs', 'tests/computer-use-driver-e2e.mjs', '.github/scripts/computer-use-driver-e2e.mjs', '.github/scripts/computer-use-owner-exit.mjs', '.github/scripts/computer-use-perception-e2e.mjs', '.github/scripts/fixtures/computer-use-perception.png']) {
     assert.deepEqual(
       selectIntegrationMatrix([file]).map(({ extension, scenario }) => [extension, scenario]),
       expectedComputerUseScenarios,
