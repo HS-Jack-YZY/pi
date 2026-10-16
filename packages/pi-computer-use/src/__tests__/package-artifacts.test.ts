@@ -40,16 +40,12 @@ describe('pi-computer-use package artifacts', () => {
     expect(mainPackage.files).not.toContain('bin');
     expect(mainPackage.scripts.postinstall).toBeUndefined();
     expect(mainPackage.optionalDependencies).toEqual(
-      Object.fromEntries([
-        ...targets.map(({ suffix }) => [
+      Object.fromEntries(
+        targets.map(({ suffix }) => [
           `@amaster.ai/pi-computer-use-cua-driver-${suffix}`,
           'workspace:*',
         ]),
-        ...['darwin-arm64', 'linux-x64', 'win32-x64'].map((target) => [
-          `@amaster.ai/pi-computer-use-cua-perception-${target}`,
-          'workspace:*',
-        ]),
-      ]),
+      ),
     );
   });
 
@@ -86,33 +82,6 @@ describe('pi-computer-use package artifacts', () => {
       expect(pkg.publishConfig.executableFiles.length).toBeGreaterThan(0);
     });
   }
-
-  it.each([
-    ['darwin-arm64', 'darwin', 'arm64'],
-    ['linux-x64', 'linux', 'x64'],
-    ['win32-x64', 'win32', 'x64'],
-  ])('installs the matching %s perception package by default', (target, os, cpu) => {
-    const name = `@amaster.ai/pi-computer-use-cua-perception-${target}`;
-    const main = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
-    const pkg = JSON.parse(
-      readFileSync(join(platformsRoot, `cua-perception-${target}`, 'package.json'), 'utf8'),
-    );
-    const release = JSON.parse(readFileSync(join(packageRoot, 'perception-release.json'), 'utf8'));
-    const source = readFileSync(
-      join(platformsRoot, `cua-perception-${target}`, 'SOURCE.md'),
-      'utf8',
-    );
-    expect(main.optionalDependencies[name]).toBe('workspace:*');
-    expect(main.peerDependencies).not.toHaveProperty(name);
-    expect(pkg.version).toBe('0.1.0');
-    expect(pkg.cuaPerceptionVersion).toBe(release.version);
-    expect(pkg.os).toEqual([os]);
-    expect(pkg.cpu).toEqual([cpu]);
-    expect(pkg.files).toContain('artifacts');
-    expect(pkg.exports['./catalog']).toBe(`./artifacts/${release.targets[target].catalog}`);
-    expect(source).toContain(release.targets[target].archiveSha256);
-    expect(source).toContain('AGPL-3.0-only');
-  });
 
   it('publishes platform runtimes before the main package', () => {
     const runtimeWorkflow = readFileSync(

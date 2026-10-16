@@ -141,7 +141,7 @@ jobs:
         run: node packages/pi-computer-use/scripts/fetch-driver.mjs ${{ matrix.target }}
         shell: bash
       - name: Fetch verified Cua Perception artifacts
-        run: node packages/pi-computer-use/scripts/fetch-perception.mjs ${{ matrix.perception_target }}
+        run: node packages/pi-computer-use/scripts/fetch-perception.mjs ${{ matrix.perception_target }} "${{ runner.temp }}/cua-perception"
         shell: bash
       - run: pnpm --filter @amaster.ai/pi-shared build
         shell: bash
@@ -156,7 +156,9 @@ jobs:
           fi
         shell: bash
 
-      - name: Verify packaged perception installation and real OCR
+      - name: Verify upstream perception installation and real OCR
+        env:
+          CUA_DRIVER_PERCEPTION_DIR: ${{ runner.temp }}/cua-perception
         shell: bash
         run: |
           if [ "$RUNNER_OS" = Linux ]; then

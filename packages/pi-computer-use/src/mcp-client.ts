@@ -43,16 +43,7 @@ const execFileAsync = promisify(execFile);
 const localRequire = createRequire(import.meta.url);
 
 function extensionEnvironment(): Record<string, string> {
-  let catalog = process.env.CUA_DRIVER_PERCEPTION_CATALOG;
-  if (!catalog) {
-    try {
-      catalog = localRequire.resolve(
-        `@amaster.ai/pi-computer-use-cua-perception-${process.platform}-${process.arch}/catalog`,
-      );
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'MODULE_NOT_FOUND') throw error;
-    }
-  }
+  const catalog = process.env.CUA_DRIVER_PERCEPTION_CATALOG;
   return {
     ...(catalog ? { CUA_DRIVER_PERCEPTION_CATALOG: catalog } : {}),
     ...(process.env.CUA_DRIVER_RS_HOME

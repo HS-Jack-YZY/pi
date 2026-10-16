@@ -26,7 +26,7 @@ The `cursor` group exposes six motion styles through `set_agent_cursor_motion`: 
 bun add @amaster.ai/pi-computer-use
 ```
 
-The package selects one signed/precompiled platform runtime through npm `optionalDependencies`. Installation downloads the matching Driver and supported perception artifact packages from npm, with no GitHub download or separate Driver installation required. Offline mirrors must include `@amaster.ai/pi-computer-use` and the matching `@amaster.ai/pi-computer-use-cua-driver-*` and supported `@amaster.ai/pi-computer-use-cua-perception-*` packages.
+The package selects one signed/precompiled platform runtime through npm `optionalDependencies`. Installation downloads the matching Driver package from npm, with no separate Driver installation required. Offline mirrors must include `@amaster.ai/pi-computer-use` and the matching `@amaster.ai/pi-computer-use-cua-driver-*` package. Optional Perception artifacts are downloaded directly from Cua only when needed; they are not npm dependencies.
 
 Upgrading from Cua Driver 0.9 is a deliberate public-tool migration: upstream removed `set_agent_cursor_style` and replaced it with `set_agent_cursor_theme`. The new tool selects an installed `theme_id`; the old custom color/image parameters have no 0.28 equivalent.
 
@@ -103,7 +103,7 @@ Before typed browser actions such as navigation, clicks, typing, pointer input, 
 
 ### Optional local perception
 
-`parse_visual_regions` uses the separately installed `cua-perception` worker to return OCR text and icon regions from a registered screenshot. It runs locally without Python or a provider API key. Installing `pi-computer-use` downloads the matching perception artifact package by default on supported targets. Enabling the worker in the Driver store remains an explicit confirmed operation; accessibility and browser tools remain usable without it.
+`parse_visual_regions` uses the separately installed `cua-perception` worker to return OCR text and icon regions from a registered screenshot. It runs locally without Python or a provider API key. It is not bundled, downloaded, or installed by `pi-computer-use`. Accessibility, browser tools, and screenshot reasoning remain usable without it. On `not_installed`, continue with those tools unless local OCR/icon parsing is needed. The tool descriptions guide agents through direct upstream installation on demand.
 
 Perception has its own release and platform support. [Cua Perception 0.2.1](https://github.com/trycua/cua/releases/tag/cua-perception-v0.2.1) publishes these targets:
 
@@ -117,35 +117,30 @@ There are no published 0.2.1 artifacts for macOS Intel, Linux ARM64, or Windows 
 
 The approximately 421–426 MB compressed bundle contains the native worker, ONNX Runtime, OmniParser icon detector, PP-OCR text detector/English recognizer, dictionary, notices, and corresponding-source materials. The release identifies the OmniParser detector as AGPL-3.0-only and the PP-OCR artifacts as Apache-2.0; other bundled components retain their own licenses. Read the release's SBOM and [third-party notices](https://github.com/trycua/cua/blob/cua-driver-rs-v0.35.4/libs/cua-driver/docs/perception-third-party-notices.md) before redistribution. These artifacts are not included in this extension's Apache-2.0 package or the default MIT Driver package.
 
-The signed artifacts are distributed as independent platform packages under `platforms/`. They are `optionalDependencies`, like the Driver packages: npm selects the matching OS/CPU package and installs it by default. An unsupported target or omitted optional dependency does not prevent installation of the extension:
+To install on demand, the agent or user downloads the signed catalog and matching archive from the [official Perception release](https://github.com/trycua/cua/releases/tag/cua-perception-v0.2.1) into the same directory. For 0.2.1, select `cua-perception-0.2.1-<target>.catalog.json` and `cua-perception-0.2.1-<target>.tar.gz` using the target above. Do not use the repository-wide Latest release: Driver and Perception have separate release tags. Keep the complete upstream archive and signature verification intact. Expired catalogs require a newer Perception release.
 
-| OS / CPU | Optional npm package |
-| --- | --- |
-| macOS ARM64 | `@amaster.ai/pi-computer-use-cua-perception-darwin-arm64` |
-| Linux x64 | `@amaster.ai/pi-computer-use-cua-perception-linux-x64` |
-| Windows x64 | `@amaster.ai/pi-computer-use-cua-perception-win32-x64` |
-
-The platform npm packages start at version `0.1.0`; their `cuaPerceptionVersion` metadata independently records the bundled upstream version `0.2.1`. Users do not need a separate `bun add` command for perception.
-
-The extension resolves the platform package's signed catalog and passes it to its Driver daemon and MCP proxy, including LaunchServices on macOS. No manual GitHub download or environment variable is needed. Activate `/computer-use-tools diagnostics`, then call `computer_use_install_extension({name:"perception"})` to preview the verified publisher, target, size, licenses and source. After reviewing that plan, call `computer_use_install_extension({name:"perception", confirm:true})` to install. The existing Pi dangerous-action confirmation still applies. Downloading the npm artifact package does not activate the worker or run a postinstall script.
-
-The Driver verifies the signed catalog and archive before installing into its user-owned extension store. Use the same user and `CUA_DRIVER_RS_HOME` for installation and parsing. Installs become visible on the next parse without restarting the Driver. A custom reviewed `CUA_DRIVER_PERCEPTION_CATALOG` overrides the package catalog; its original signed archive must be in the same directory. Expired catalogs require a newer published perception release.
-
-For manual/offline installation, download the catalog and matching archive from the upstream release into one directory, then use the existing Driver CLI. Resolve the bundled binary from the project containing `pi-computer-use`:
+Use the configured Driver binary, or resolve the bundled binary from the installation containing `pi-computer-use`:
 
 ```bash
 node --input-type=module -e "import { resolveDriverLayout } from '@amaster.ai/pi-computer-use'; console.log(resolveDriverLayout({mode:'bundled'}).binaryPath)"
 ```
 
-Run that binary with `extension inspect cua-perception --catalog <catalog.json>`, review the plan, then `extension install cua-perception --catalog <catalog.json>` and `extension status cua-perception --self-test`. The npm package contains the same unmodified catalog/archive pair and all upstream notices and corresponding-source materials inside the archive; signature verification is never bypassed.
+With the same user and `CUA_DRIVER_RS_HOME` as Pi, run these commands using that binary:
+
+```bash
+cua-driver extension inspect cua-perception --catalog /absolute/path/to/catalog.json
+# Review publisher, target, size, licenses and source before installing within user authorization.
+cua-driver extension install cua-perception --catalog /absolute/path/to/catalog.json
+cua-driver extension status cua-perception --self-test
+```
+
+The Driver verifies the signed catalog and archive before installing into its own extension store. A running Driver detects the installation on the next parse without restarting. The `computer_use_install_extension` MCP tool does not download files: it requires `CUA_DRIVER_PERCEPTION_CATALOG` to point to the local catalog at daemon launch. Prefer the CLI above for an existing session; explicit catalog/store environment variables are still forwarded to the daemon and MCP proxy.
 
 Activate `/computer-use-tools diagnostics`, then ask Pi to capture the exact window with `computer_use_get_window_state({pid, window_id, include_screenshot:true})` and pass its returned `capture_id` to `computer_use_parse_visual_regions({capture_id, options:{max_regions:3}})`. Keep both calls on the same Pi connection and repeat the same `session` label if one is used. `snapshot_id` is not a capture ID. The installation plan and parse results are exposed in bounded model-visible text. Parse results include region text/labels/bounds and the capture's action-coordinate transform. A missing extension returns `not_installed`; stale or expired captures require another capture. Do not remove `capture_id` to bypass a rejected pixel action.
 
 Use `extension inspect` before `extension update cua-perception --catalog ...` to change versions. To remove only the Driver-managed installation, run the same binary with `extension remove cua-perception`. See the [upstream lifecycle documentation](https://github.com/trycua/cua/blob/cua-driver-rs-v0.35.4/libs/cua-driver/docs/perception-extension.md) for the complete contract.
 
-Validated on macOS ARM64 with Driver 0.35.4, publisher-verified Perception 0.2.1, and local Pi 1.2.0 + Kimi K3. The main, Driver and perception tarballs were installed with npm into a clean dependency tree. With `CUA_DRIVER_PERCEPTION_CATALOG` unset and an empty Driver store, Pi automatically found the packaged catalog, previewed it, and explicitly installed through `install_extension`. Integrity/self-test and same-connection/session capture → parse passed; OCR matched a randomly generated canvas-only code, with bounded regions and model-visible coordinates. The earlier missing-extension case and 3/10-region limits were also verified. A main-package-only installation against a local registry fixture also automatically installed the matching perception npm package `0.1.0` (upstream `0.2.1`) and exposed its publisher-verified catalog, without explicitly installing the native package. Linux/Windows archives were hash-verified, but native installation and runtime execution have not been tested locally.
-
-For maintainers, `node packages/pi-computer-use/scripts/fetch-perception.mjs <target>` populates each platform package's ignored `artifacts/` directory from `perception-release.json`. The `Publish pi-computer-use Cua Perception` workflow verifies installation/self-test on all three native runners before publishing. The main npm publication workflow exposes `publish_cua_perception` to run this dependency publication first.
+For maintainers, the platform integration job downloads pinned upstream artifacts into the runner's temporary directory, verifies their hashes, and checks signed installation, self-test and real OCR. Release metadata lives under `.github/scripts/fixtures/`. The CI-only `scripts/fetch-perception.mjs <target> [destination]` keeps its stable entry point for base-branch PR workflows and defaults to `$RUNNER_TEMP/cua-perception` (or the system temporary directory outside CI). It is not shipped in the npm package. Perception has no platform npm package or publish workflow in this repository.
 
 ### Optional vision model
 

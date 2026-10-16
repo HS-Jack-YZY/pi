@@ -24,6 +24,13 @@ export { loadConfigFromFile, resolveConfig };
 
 const TOOL_PREFIX = 'computer_use_';
 
+const OPTIONAL_EXTENSION_HINTS: Record<string, string> = {
+  parse_visual_regions:
+    'Requires optional Perception. If not_installed, use accessibility/browser state or screenshot reasoning, or consult computer_use_install_extension.',
+  install_extension:
+    'Uses a local signed catalog; does not download artifacts. On-demand setup: https://github.com/TGYD-helige/pi/blob/master/packages/pi-computer-use/README.md#optional-local-perception',
+};
+
 const HIGH_RISK_TOOLS = new Set([
   'browser_download',
   'browser_prepare',
@@ -395,7 +402,9 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
                   : ('deferred' as const),
             }
           : {}),
-        description: tool.description ?? '',
+        description: [tool.description, OPTIONAL_EXTENSION_HINTS[originalName]]
+          .filter(Boolean)
+          .join(' '),
         parameters: Type.Unsafe(sanitizeSchemaFormats(tool.inputSchema) as object),
         async execute(
           _toolCallId: string,

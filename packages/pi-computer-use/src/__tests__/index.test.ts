@@ -275,6 +275,19 @@ describe('computerUseExtension', () => {
     });
   });
 
+  it('keeps optional perception hints focused on each tool', async () => {
+    await start();
+
+    const parser = tools.get('computer_use_parse_visual_regions')?.description;
+    expect(parser).toContain('Requires optional Perception');
+    expect(parser).toContain('not_installed');
+    expect(parser).toContain('computer_use_install_extension');
+    const installer = tools.get('computer_use_install_extension')?.description;
+    expect(installer).toContain('local signed catalog');
+    expect(installer).toContain('does not download artifacts');
+    expect(installer).toContain('README.md#optional-local-perception');
+  });
+
   it('passes the optional extension catalog and store to the macOS daemon and proxy', async () => {
     vi.stubEnv('CUA_DRIVER_PERCEPTION_CATALOG', '/reviewed/catalog.json');
     vi.stubEnv('CUA_DRIVER_RS_HOME', '/isolated/driver-home');

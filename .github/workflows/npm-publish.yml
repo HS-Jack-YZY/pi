@@ -26,11 +26,6 @@ on:
         required: true
         default: false
         type: boolean
-      publish_cua_perception:
-        description: Publish optional Cua Perception platform packages
-        required: true
-        default: false
-        type: boolean
 permissions:
   contents: write
 
@@ -51,20 +46,13 @@ jobs:
     uses: ./.github/workflows/cua-driver-publish.yml
     secrets: inherit
 
-  cua-perception:
-    name: publish optional Cua Perception platform packages
-    if: inputs.publish_cua_perception
-    uses: ./.github/workflows/cua-perception-publish.yml
-    secrets: inherit
-
   publish:
     name: publish packages
-    needs: [ffmpeg, cua-driver, cua-perception]
+    needs: [ffmpeg, cua-driver]
     if: >
       always() &&
       (needs.ffmpeg.result == 'success' || needs.ffmpeg.result == 'skipped') &&
-      (needs.cua-driver.result == 'success' || needs.cua-driver.result == 'skipped') &&
-      (needs.cua-perception.result == 'success' || needs.cua-perception.result == 'skipped')
+      (needs.cua-driver.result == 'success' || needs.cua-driver.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
@@ -131,11 +119,6 @@ jobs:
             "utf8"
           )).version;
 
-          const cuaPerceptionVersion = JSON.parse(fs.readFileSync(
-            path.join(process.cwd(), "packages", "pi-computer-use", "perception-release.json"),
-            "utf8"
-          )).version;
-
           const platformPackages = ["pi-video-gen", "pi-computer-use"].flatMap((packageName) => {
             const root = path.join(process.cwd(), "packages", packageName, "platforms");
             return fs.readdirSync(root, { withFileTypes: true })
@@ -150,11 +133,8 @@ jobs:
               if (pkg.cuaDriverVersion && pkg.cuaDriverVersion !== cuaDriverVersion) {
                 throw new Error(`${ref} declares Cua Driver ${pkg.cuaDriverVersion}, expected ${cuaDriverVersion}`);
               }
-              if (pkg.cuaPerceptionVersion && pkg.cuaPerceptionVersion !== cuaPerceptionVersion) {
-                throw new Error(`${ref} declares Cua Perception ${pkg.cuaPerceptionVersion}, expected ${cuaPerceptionVersion}`);
-              }
-              const field = pkg.cuaDriverVersion ? "cuaDriverVersion" : pkg.cuaPerceptionVersion ? "cuaPerceptionVersion" : "version";
-              const expected = pkg.cuaDriverVersion || pkg.cuaPerceptionVersion || pkg.version;
+              const field = pkg.cuaDriverVersion ? "cuaDriverVersion" : "version";
+              const expected = pkg.cuaDriverVersion || pkg.version;
               const published = execFileSync("npm", ["view", ref, field], {
                 encoding: "utf8",
                 stdio: ["ignore", "pipe", "pipe"],
