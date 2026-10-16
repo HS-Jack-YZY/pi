@@ -140,7 +140,7 @@ Activate `/computer-use-tools diagnostics`, then ask Pi to capture the exact win
 
 Use `extension inspect` before `extension update cua-perception --catalog ...` to change versions. To remove only the Driver-managed installation, run the same binary with `extension remove cua-perception`. See the [upstream lifecycle documentation](https://github.com/trycua/cua/blob/cua-driver-rs-v0.35.4/libs/cua-driver/docs/perception-extension.md) for the complete contract.
 
-For maintainers, the platform integration job downloads pinned upstream artifacts into the runner's temporary directory, verifies their hashes, and checks signed installation, self-test and real OCR. The fixture release metadata and download helper live under `.github/scripts/`; Perception has no platform npm package or publish workflow in this repository.
+For maintainers, the platform integration job downloads pinned upstream artifacts into the runner's temporary directory, verifies their hashes, and checks signed installation, self-test and real OCR. Release metadata lives under `.github/scripts/fixtures/`. The CI-only `scripts/fetch-perception.mjs <target> [destination]` keeps its stable entry point for base-branch PR workflows and defaults to `$RUNNER_TEMP/cua-perception` (or the system temporary directory outside CI). It is not shipped in the npm package. Perception has no platform npm package or publish workflow in this repository.
 
 ### Optional vision model
 

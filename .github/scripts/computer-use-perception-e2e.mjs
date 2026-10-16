@@ -13,9 +13,9 @@ const { CuaDriverClient, resolveDriverLayout } = await import(
 );
 const work = mkdtempSync(path.join(tmpdir(), 'pi-computer-use-perception-e2e-'));
 process.env.CUA_DRIVER_RS_HOME = path.join(work, 'driver-home');
-assert(process.env.CUA_DRIVER_PERCEPTION_DIR, 'Set CUA_DRIVER_PERCEPTION_DIR to the downloaded upstream artifacts');
 const artifact = release.targets[`${process.platform}-${process.arch}`];
-const catalog = path.join(process.env.CUA_DRIVER_PERCEPTION_DIR, artifact.catalog);
+const artifactDir = process.env.CUA_DRIVER_PERCEPTION_DIR ?? path.join(process.env.RUNNER_TEMP ?? tmpdir(), 'cua-perception');
+const catalog = path.resolve(artifactDir, artifact.catalog);
 process.env.CUA_DRIVER_PERCEPTION_CATALOG = catalog;
 const { binaryPath } = resolveDriverLayout({ mode: 'bundled' });
 const cli = (args) => execFileSync(binaryPath, args, {

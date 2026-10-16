@@ -54,9 +54,21 @@ test('verifies perception installation and real inference on every supported tar
   for (const target of ['darwin-arm64', 'linux-x64', 'win32-x64']) {
     assert.ok(job.includes(`perception_target: ${target}`));
   }
-  assert.match(job, /node \.github\/scripts\/computer-use-fetch-perception\.mjs \$\{\{ matrix\.perception_target \}\}/);
+  assert.match(job, /node packages\/pi-computer-use\/scripts\/fetch-perception\.mjs \$\{\{ matrix\.perception_target \}\}/);
   assert.match(job, /node \.github\/scripts\/computer-use-perception-e2e\.mjs/);
   assert.match(job, /xvfb-run -a/);
+});
+
+test('keeps the base workflow Perception fetch command callable without a destination', () => {
+  const script = new URL('../../packages/pi-computer-use/scripts/fetch-perception.mjs', import.meta.url);
+  assert.throws(() => execFileSync(process.execPath, ['--input-type=module', '--eval', `
+    process.argv[2] = 'darwin-arm64';
+    globalThis.fetch = async () => ({ ok: false, status: 503 });
+    await import(${JSON.stringify(script.href)});
+  `], { stdio: 'pipe' }), (error) => {
+    assert.match(error.stderr.toString(), /Cua Perception download failed \(503\)/);
+    return true;
+  });
 });
 
 test('runs model-backed computer-use E2E on Linux, macOS, and Windows', async () => {
@@ -175,7 +187,7 @@ test('routes companion packages and package-specific integration tests', () => {
     selectIntegrationMatrix(['.github/scripts/pi-memory-snapshot-e2e.mjs']).map(({ extension }) => extension),
     ['pi-memory'],
   );
-  for (const file of ['tests/computer-use-owner-exit.mjs', 'tests/computer-use-driver-e2e.mjs', '.github/scripts/computer-use-driver-e2e.mjs', '.github/scripts/computer-use-owner-exit.mjs', '.github/scripts/computer-use-perception-e2e.mjs', '.github/scripts/fixtures/computer-use-perception.png', '.github/scripts/computer-use-fetch-perception.mjs', '.github/scripts/fixtures/computer-use-perception-release.json']) {
+  for (const file of ['tests/computer-use-owner-exit.mjs', 'tests/computer-use-driver-e2e.mjs', '.github/scripts/computer-use-driver-e2e.mjs', '.github/scripts/computer-use-owner-exit.mjs', '.github/scripts/computer-use-perception-e2e.mjs', '.github/scripts/fixtures/computer-use-perception.png', 'packages/pi-computer-use/scripts/fetch-perception.mjs', '.github/scripts/fixtures/computer-use-perception-release.json']) {
     assert.deepEqual(
       selectIntegrationMatrix([file]).map(({ extension, scenario }) => [extension, scenario]),
       expectedComputerUseScenarios,

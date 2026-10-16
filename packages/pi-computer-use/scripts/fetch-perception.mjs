@@ -4,9 +4,10 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-const release = JSON.parse(readFileSync(new URL('./fixtures/computer-use-perception-release.json', import.meta.url), 'utf8'));
+const release = JSON.parse(readFileSync(new URL('../../../.github/scripts/fixtures/computer-use-perception-release.json', import.meta.url), 'utf8'));
 const target = process.argv[2] ?? `${process.platform}-${process.arch}`;
-const destination = resolve(process.argv[3]);
+// Keep the entry point and default directory compatible with base-branch pull_request_target workflows.
+const destination = resolve(process.argv[3] ?? join(process.env.RUNNER_TEMP ?? tmpdir(), 'cua-perception'));
 const artifact = release.targets[target];
 if (!artifact) throw new Error(`Unsupported Cua Perception target: ${target}`);
 const work = mkdtempSync(join(tmpdir(), `pi-cua-perception-${target}-`));
