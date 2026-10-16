@@ -54,7 +54,7 @@ test('verifies perception installation and real inference on every supported tar
   for (const target of ['darwin-arm64', 'linux-x64', 'win32-x64']) {
     assert.ok(job.includes(`perception_target: ${target}`));
   }
-  assert.match(job, /fetch-perception\.mjs \$\{\{ matrix\.perception_target \}\}/);
+  assert.match(job, /node \.github\/scripts\/computer-use-fetch-perception\.mjs \$\{\{ matrix\.perception_target \}\}/);
   assert.match(job, /node \.github\/scripts\/computer-use-perception-e2e\.mjs/);
   assert.match(job, /xvfb-run -a/);
 });
@@ -175,7 +175,7 @@ test('routes companion packages and package-specific integration tests', () => {
     selectIntegrationMatrix(['.github/scripts/pi-memory-snapshot-e2e.mjs']).map(({ extension }) => extension),
     ['pi-memory'],
   );
-  for (const file of ['tests/computer-use-owner-exit.mjs', 'tests/computer-use-driver-e2e.mjs', '.github/scripts/computer-use-driver-e2e.mjs', '.github/scripts/computer-use-owner-exit.mjs', '.github/scripts/computer-use-perception-e2e.mjs', '.github/scripts/fixtures/computer-use-perception.png']) {
+  for (const file of ['tests/computer-use-owner-exit.mjs', 'tests/computer-use-driver-e2e.mjs', '.github/scripts/computer-use-driver-e2e.mjs', '.github/scripts/computer-use-owner-exit.mjs', '.github/scripts/computer-use-perception-e2e.mjs', '.github/scripts/fixtures/computer-use-perception.png', '.github/scripts/computer-use-fetch-perception.mjs', '.github/scripts/fixtures/computer-use-perception-release.json']) {
     assert.deepEqual(
       selectIntegrationMatrix([file]).map(({ extension, scenario }) => [extension, scenario]),
       expectedComputerUseScenarios,

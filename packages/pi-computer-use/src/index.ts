@@ -24,6 +24,9 @@ export { loadConfigFromFile, resolveConfig };
 
 const TOOL_PREFIX = 'computer_use_';
 
+const PERCEPTION_INSTALL_GUIDANCE =
+  "Optional local perception is not bundled and is only needed for OCR/icon regions. On not_installed, continue with accessibility, browser state, or screenshot reasoning unless local parsing is needed. To install on demand, download the signed catalog and matching archive together from https://github.com/trycua/cua/releases (cua-perception-v*; 0.2.1 supports macOS arm64, Linux x64, Windows x64; approximately 421–426 MB). Select the native target and keep both files in the same directory. Use the configured cua-driver binary or resolve the bundled path with resolveDriverLayout({mode: 'bundled'}).binaryPath exported by @amaster.ai/pi-computer-use, with the same user and CUA_DRIVER_RS_HOME as Pi: run `cua-driver extension inspect cua-perception --catalog <catalog.json>`, review publisher, target, size and licenses, then install within user authorization using `cua-driver extension install cua-perception --catalog <catalog.json>` and verify `cua-driver extension status cua-perception --self-test`. Keep signature verification enabled. The running Driver detects the installation on the next parse. The MCP install_extension tool only uses a local catalog configured via CUA_DRIVER_PERCEPTION_CATALOG at daemon launch; it does not download artifacts.";
+
 const HIGH_RISK_TOOLS = new Set([
   'browser_download',
   'browser_prepare',
@@ -395,7 +398,10 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
                   : ('deferred' as const),
             }
           : {}),
-        description: tool.description ?? '',
+        description:
+          originalName === 'parse_visual_regions' || originalName === 'install_extension'
+            ? `${tool.description ?? ''} ${PERCEPTION_INSTALL_GUIDANCE}`
+            : (tool.description ?? ''),
         parameters: Type.Unsafe(sanitizeSchemaFormats(tool.inputSchema) as object),
         async execute(
           _toolCallId: string,

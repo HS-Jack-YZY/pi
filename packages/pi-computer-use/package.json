@@ -50,10 +50,7 @@
     "@amaster.ai/pi-computer-use-cua-driver-linux-arm64": "workspace:*",
     "@amaster.ai/pi-computer-use-cua-driver-linux-x64": "workspace:*",
     "@amaster.ai/pi-computer-use-cua-driver-win32-arm64": "workspace:*",
-    "@amaster.ai/pi-computer-use-cua-driver-win32-x64": "workspace:*",
-    "@amaster.ai/pi-computer-use-cua-perception-darwin-arm64": "workspace:*",
-    "@amaster.ai/pi-computer-use-cua-perception-linux-x64": "workspace:*",
-    "@amaster.ai/pi-computer-use-cua-perception-win32-x64": "workspace:*"
+    "@amaster.ai/pi-computer-use-cua-driver-win32-x64": "workspace:*"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.80.10",

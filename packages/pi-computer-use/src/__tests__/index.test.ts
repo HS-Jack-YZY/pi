@@ -275,6 +275,20 @@ describe('computerUseExtension', () => {
     });
   });
 
+  it('tells agents to install optional perception directly from the official release', async () => {
+    await start();
+
+    for (const name of ['parse_visual_regions', 'install_extension']) {
+      const description = tools.get(`computer_use_${name}`)?.description;
+      expect(description).toContain('not bundled');
+      expect(description).toContain('https://github.com/trycua/cua/releases');
+      expect(description).toContain('extension inspect cua-perception --catalog');
+      expect(description).toContain('extension install cua-perception --catalog');
+      expect(description).toContain('same user and CUA_DRIVER_RS_HOME');
+      expect(description).toContain('not_installed');
+    }
+  });
+
   it('passes the optional extension catalog and store to the macOS daemon and proxy', async () => {
     vi.stubEnv('CUA_DRIVER_PERCEPTION_CATALOG', '/reviewed/catalog.json');
     vi.stubEnv('CUA_DRIVER_RS_HOME', '/isolated/driver-home');
