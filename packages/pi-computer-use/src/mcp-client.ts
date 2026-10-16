@@ -42,8 +42,27 @@ done
 const execFileAsync = promisify(execFile);
 const localRequire = createRequire(import.meta.url);
 
-function requestOptions(signal?: AbortSignal) {
-  return signal ? { signal, timeout: MCP_TIMEOUT_MS } : { timeout: MCP_TIMEOUT_MS };
+function extensionEnvironment(): Record<string, string> {
+  let catalog = process.env.CUA_DRIVER_PERCEPTION_CATALOG;
+  if (!catalog) {
+    try {
+      catalog = localRequire.resolve(
+        `@amaster.ai/pi-computer-use-cua-perception-${process.platform}-${process.arch}/catalog`,
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'MODULE_NOT_FOUND') throw error;
+    }
+  }
+  return {
+    ...(catalog ? { CUA_DRIVER_PERCEPTION_CATALOG: catalog } : {}),
+    ...(process.env.CUA_DRIVER_RS_HOME
+      ? { CUA_DRIVER_RS_HOME: process.env.CUA_DRIVER_RS_HOME }
+      : {}),
+  };
+}
+
+function requestOptions(signal?: AbortSignal, timeout = MCP_TIMEOUT_MS) {
+  return signal ? { signal, timeout } : { timeout };
 }
 
 function abortError(signal?: AbortSignal): Error {
@@ -356,6 +375,7 @@ export class CuaDriverClient {
       const env = layout.embedded
         ? { ...getDefaultEnvironment(), CUA_DRIVER_EMBEDDED: '1' }
         : getDefaultEnvironment();
+      Object.assign(env, extensionEnvironment());
 
       const transport = new StdioClientTransport({
         command: layout.binaryPath,
@@ -411,7 +431,11 @@ export class CuaDriverClient {
   }
 
   private daemonEnvironment(embedded: boolean): NodeJS.ProcessEnv {
-    return embedded ? { ...process.env, CUA_DRIVER_EMBEDDED: '1' } : process.env;
+    return {
+      ...process.env,
+      ...extensionEnvironment(),
+      ...(embedded ? { CUA_DRIVER_EMBEDDED: '1' } : {}),
+    };
   }
 
   private async ensureDaemon(layout: DriverLayout, signal?: AbortSignal): Promise<string> {
@@ -454,7 +478,20 @@ export class CuaDriverClient {
     if (process.platform === 'darwin' && layout.appPath && !layout.embedded) {
       const launcher = spawn(
         '/usr/bin/open',
-        ['-n', '-g', layout.appPath, '--args', 'serve', '--socket', socket, '--no-overlay'],
+        [
+          '-n',
+          '-g',
+          layout.appPath,
+          ...Object.entries(extensionEnvironment()).flatMap(([key, value]) => [
+            '--env',
+            `${key}=${value}`,
+          ]),
+          '--args',
+          'serve',
+          '--socket',
+          socket,
+          '--no-overlay',
+        ],
         { stdio: 'ignore' },
       );
       await this.waitForLauncher(launcher, signal);
@@ -630,7 +667,11 @@ export class CuaDriverClient {
       return (await client.callTool(
         { name, arguments: args },
         undefined,
-        requestOptions(signal),
+        // Leave transport time for the driver's bounded automation result to arrive.
+        requestOptions(
+          signal,
+          name === 'run_script' ? 125_000 : name === 'run_steps' ? 65_000 : MCP_TIMEOUT_MS,
+        ),
       )) as McpToolResult;
     } catch {
       if (signal?.aborted) throw abortError(signal);

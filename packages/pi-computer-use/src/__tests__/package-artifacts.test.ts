@@ -13,6 +13,8 @@ const mainPackage = JSON.parse(readFileSync(join(packageRoot, 'package.json'), '
 };
 const release = JSON.parse(readFileSync(join(packageRoot, 'driver-release.json'), 'utf8')) as {
   version: string;
+  tag: string;
+  targets: Record<string, { asset: string; sha256: string }>;
 };
 const targets = [
   { suffix: 'darwin-universal', os: 'darwin', cpu: undefined },
@@ -38,12 +40,16 @@ describe('pi-computer-use package artifacts', () => {
     expect(mainPackage.files).not.toContain('bin');
     expect(mainPackage.scripts.postinstall).toBeUndefined();
     expect(mainPackage.optionalDependencies).toEqual(
-      Object.fromEntries(
-        targets.map(({ suffix }) => [
+      Object.fromEntries([
+        ...targets.map(({ suffix }) => [
           `@amaster.ai/pi-computer-use-cua-driver-${suffix}`,
           'workspace:*',
         ]),
-      ),
+        ...['darwin-arm64', 'linux-x64', 'win32-x64'].map((target) => [
+          `@amaster.ai/pi-computer-use-cua-perception-${target}`,
+          'workspace:*',
+        ]),
+      ]),
     );
   });
 
@@ -61,6 +67,14 @@ describe('pi-computer-use package artifacts', () => {
         files: string[];
         publishConfig: { executableFiles: string[] };
       };
+      const source = readFileSync(
+        join(platformsRoot, `cua-driver-${target.suffix}`, 'SOURCE.md'),
+        'utf8',
+      );
+      const artifact = release.targets[target.suffix]!;
+      expect(source).toContain(release.tag);
+      expect(source).toContain(artifact.asset);
+      expect(source).toContain(artifact.sha256);
       expect(pkg.name).toBe(`@amaster.ai/pi-computer-use-cua-driver-${target.suffix}`);
       expect(pkg.version).toBe(preparedPackageVersion ?? '0.1.0');
       expect(pkg.version).toMatch(/^0\.1\.\d+$/);
@@ -72,6 +86,33 @@ describe('pi-computer-use package artifacts', () => {
       expect(pkg.publishConfig.executableFiles.length).toBeGreaterThan(0);
     });
   }
+
+  it.each([
+    ['darwin-arm64', 'darwin', 'arm64'],
+    ['linux-x64', 'linux', 'x64'],
+    ['win32-x64', 'win32', 'x64'],
+  ])('installs the matching %s perception package by default', (target, os, cpu) => {
+    const name = `@amaster.ai/pi-computer-use-cua-perception-${target}`;
+    const main = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
+    const pkg = JSON.parse(
+      readFileSync(join(platformsRoot, `cua-perception-${target}`, 'package.json'), 'utf8'),
+    );
+    const release = JSON.parse(readFileSync(join(packageRoot, 'perception-release.json'), 'utf8'));
+    const source = readFileSync(
+      join(platformsRoot, `cua-perception-${target}`, 'SOURCE.md'),
+      'utf8',
+    );
+    expect(main.optionalDependencies[name]).toBe('workspace:*');
+    expect(main.peerDependencies).not.toHaveProperty(name);
+    expect(pkg.version).toBe('0.1.0');
+    expect(pkg.cuaPerceptionVersion).toBe(release.version);
+    expect(pkg.os).toEqual([os]);
+    expect(pkg.cpu).toEqual([cpu]);
+    expect(pkg.files).toContain('artifacts');
+    expect(pkg.exports['./catalog']).toBe(`./artifacts/${release.targets[target].catalog}`);
+    expect(source).toContain(release.targets[target].archiveSha256);
+    expect(source).toContain('AGPL-3.0-only');
+  });
 
   it('publishes platform runtimes before the main package', () => {
     const runtimeWorkflow = readFileSync(

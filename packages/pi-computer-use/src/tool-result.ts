@@ -319,6 +319,29 @@ function buildEnrichment(toolName: string, result: McpToolResult): string | unde
           ),
         );
         break;
+      case 'install_extension':
+        parts.push(
+          ...structuredFieldLines(
+            {
+              version: sc.version,
+              target: sc.target,
+              publisher: sc.publisher,
+              trust: sc.trust,
+              license: sc.license,
+              license_notices: sc.license_notices,
+              source: sc.source,
+              corresponding_source: sc.corresponding_source,
+              download_size: sc.download_size,
+              installed_size: sc.installed_size,
+              destination: sc.destination,
+              authorization: sc.authorization,
+              installed: sc.installed,
+              installed_version: sc.installed_version,
+            },
+            existingText,
+          ),
+        );
+        break;
       case 'parse_visual_regions':
         parts.push(
           ...structuredFieldLines(
@@ -408,6 +431,7 @@ function buildEnrichment(toolName: string, result: McpToolResult): string | unde
     const elements = asRecordArray(sc.elements);
     if (
       !TREE_LINE.test(originalText) &&
+      !(typeof sc.tree_diff === 'string' && sc.tree_diff.trim()) &&
       ((elementCount !== undefined && elementCount > 0) || elements.length > 0)
     ) {
       parts.push(

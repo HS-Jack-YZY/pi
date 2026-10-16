@@ -133,6 +133,15 @@ importers:
       '@amaster.ai/pi-computer-use-cua-driver-win32-x64':
         specifier: workspace:*
         version: link:platforms/cua-driver-win32-x64
+      '@amaster.ai/pi-computer-use-cua-perception-darwin-arm64':
+        specifier: workspace:*
+        version: link:platforms/cua-perception-darwin-arm64
+      '@amaster.ai/pi-computer-use-cua-perception-linux-x64':
+        specifier: workspace:*
+        version: link:platforms/cua-perception-linux-x64
+      '@amaster.ai/pi-computer-use-cua-perception-win32-x64':
+        specifier: workspace:*
+        version: link:platforms/cua-perception-win32-x64
 
   packages/pi-computer-use/platforms/cua-driver-darwin-universal: {}
 
@@ -143,6 +152,12 @@ importers:
   packages/pi-computer-use/platforms/cua-driver-win32-arm64: {}
 
   packages/pi-computer-use/platforms/cua-driver-win32-x64: {}
+
+  packages/pi-computer-use/platforms/cua-perception-darwin-arm64: {}
+
+  packages/pi-computer-use/platforms/cua-perception-linux-x64: {}
+
+  packages/pi-computer-use/platforms/cua-perception-win32-x64: {}
 
   packages/pi-dingtalk:
     dependencies:

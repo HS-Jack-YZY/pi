@@ -33,6 +33,8 @@ const HIGH_RISK_TOOLS = new Set([
   'install_ffmpeg',
   'kill_app',
   'replay_trajectory',
+  'run_steps',
+  'run_script',
   'start_recording',
 ]);
 
@@ -190,6 +192,7 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
 
     if (
       toolName === 'start_recording' ||
+      (toolName === 'run_script' && config?.confirmAppLaunch !== false) ||
       ((HIGH_RISK_TOOLS.has(toolName) ||
         (toolName === 'install_extension' && params.confirm === true)) &&
         config?.confirmDangerousActions !== false)

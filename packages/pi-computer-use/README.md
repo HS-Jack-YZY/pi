@@ -2,12 +2,12 @@
 
 ![pi-computer-use preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-computer-use/preview.png)
 
-Cross-platform computer-use tools for Pi desktop automation. The extension exposes a native MCP tool surface with a `computer_use_` prefix. The bundled runtime comes from the official [Cua Driver Rust 0.34.0 release](https://github.com/trycua/cua/releases/tag/cua-driver-rs-v0.34.0).
+Cross-platform computer-use tools for Pi desktop automation. The extension exposes a native MCP tool surface with a `computer_use_` prefix. The bundled runtime comes from the official [Cua Driver Rust 0.35.4 release](https://github.com/trycua/cua/releases/tag/cua-driver-rs-v0.35.4).
 
 ## What it provides
 
-- One Rust 0.34.0 driver line across macOS, Linux, and Windows
-- 58 version-pinned upstream tools, including sessions, element tokens, accessibility + screenshot state, native input, browser tools, diagnostics, recording, and permission policy support
+- One Rust 0.35.4 driver line across macOS, Linux, and Windows
+- 60 version-pinned upstream tools, including sessions, element tokens, accessibility + screenshot state, native input, browser tools, diagnostics, recording, and permission policy support
 - Deferred tool activation: only the core toolset is active by default; extra groups are activated on demand via `computer_use_tools` or `/computer-use-tools`
 - Full MCP text, image, and `structuredContent` forwarding
 - Owned daemon + MCP proxy lifecycle with session-owned reconnect and per-call cancellation
@@ -16,7 +16,7 @@ Cross-platform computer-use tools for Pi desktop automation. The extension expos
 - Bounded text and structured results before they enter Pi's context
 - Optional secondary vision analysis through a configured Pi model
 
-`get_window_state` is the primary perception tool. Cua Driver 0.34 returns the accessibility tree, structured elements with `element_token`, and a screenshot in one response. The standalone `screenshot` tool no longer exists.
+`get_window_state` is the primary perception tool. Cua Driver 0.35.4 defaults to a compact Markdown accessibility tree. Request `tree_format:"both"` for structured elements with `element_token`, and `include_screenshot:true` when a screenshot is needed. The standalone `screenshot` tool no longer exists.
 
 The `cursor` group exposes six motion styles through `set_agent_cursor_motion`: `signature_arc`, `spring_settle`, `magnetic`, `comet_swoop`, `adaptive`, and `classic`. Set initial motion with `start_session.cursor_motion`, or save defaults through `set_config` using `cursor.motion.*` keys. The `diagnostics` group includes `parse_visual_regions` for registered captures and `install_extension` for optional Driver-managed extensions; preview the plan first, then request installation with `confirm:true`. With the default `confirmDangerousActions:true`, Pi also requires interactive user approval before installation.
 
@@ -26,11 +26,13 @@ The `cursor` group exposes six motion styles through `set_agent_cursor_motion`: 
 bun add @amaster.ai/pi-computer-use
 ```
 
-The package selects one signed/precompiled platform runtime through npm `optionalDependencies`. Installation does not download from GitHub, and no separate Cua Driver installation is required. Offline mirrors must include `@amaster.ai/pi-computer-use` and the matching `@amaster.ai/pi-computer-use-cua-driver-*` package.
+The package selects one signed/precompiled platform runtime through npm `optionalDependencies`. Installation downloads the matching Driver and supported perception artifact packages from npm, with no GitHub download or separate Driver installation required. Offline mirrors must include `@amaster.ai/pi-computer-use` and the matching `@amaster.ai/pi-computer-use-cua-driver-*` and supported `@amaster.ai/pi-computer-use-cua-perception-*` packages.
 
 Upgrading from Cua Driver 0.9 is a deliberate public-tool migration: upstream removed `set_agent_cursor_style` and replaced it with `set_agent_cursor_theme`. The new tool selects an installed `theme_id`; the old custom color/image parameters have no 0.28 equivalent.
 
 Upgrading to Cua Driver 0.34 removes `element_index` and `snapshot_id` from action parameters. Use the current snapshot's `element_token` for accessibility actions; `element_index` remains display metadata. For pixel actions, pass `capture_id` from the source screenshot when available. A fresh snapshot invalidates previous element tokens, so refresh state before acting again.
+
+Cua Driver 0.35 replaces the legacy `set_config({key, value})` form with named properties, for example `set_config({"cursor.motion.timing": "steady"})`. Use the registered schema for the supported properties. The new `automation` group exposes `run_steps` for fixed action sequences and `run_script` for sandboxed JavaScript; both require interactive approval when `confirmDangerousActions:true`. Scripts also require approval when `confirmAppLaunch:true`, because they can launch applications; the approval covers the full script.
 
 ## Configuration
 
@@ -51,12 +53,12 @@ Project settings are loaded only after project trust is accepted. `${ENV_VAR}` i
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `mode` | `"bundled" \| "path"` | `"bundled"` | Use the packaged 0.34.0 driver or a compatible custom binary |
+| `mode` | `"bundled" \| "path"` | `"bundled"` | Use the packaged 0.35.4 driver or a compatible custom binary |
 | `binaryPath` | `string` | — | Custom driver path when `mode` is `"path"` |
 | `extraArgs` | `string[]` | — | Additional arguments appended to `cua-driver mcp` |
 | `confirmAppLaunch` | `boolean` | `true` | Ask once per app target before `launch_app` |
 | `confirmDangerousActions` | `boolean` | `true` | Confirm high-risk tools such as `kill_app`, `replay_trajectory`, and `install_extension` with `confirm:true`; recording always requires confirmation |
-| `toolProfile` | `"core" \| "full"` | `"core"` | `"core"` activates only the everyday toolset at session start; `"full"` activates all 58 driver tools |
+| `toolProfile` | `"core" \| "full"` | `"core"` | `"core"` activates only the everyday toolset at session start; `"full"` activates all 60 driver tools |
 | `visionModel` | `{ provider, model }` | — | Register `computer_use_analyze_screenshot` |
 
 In non-interactive modes, confirmation-required tools return an error unless the corresponding confirmation setting is explicitly disabled.
@@ -68,6 +70,7 @@ With the default `core` profile, only everyday tools are visible to the model (`
 | Group | Tools |
 | --- | --- |
 | `browser` | CDP browser automation: `browser_prepare`, `browser_navigate`, `browser_click`, `browser_type`, `browser_dialog`, `browser_set_input_files`, `browser_download`, `browser_pointer`, `get_browser_state`, `page` |
+| `automation` | `run_steps`, `run_script` |
 | `recording` | `start_recording`, `stop_recording`, `get_recording_state`, `replay_trajectory`, `install_ffmpeg` |
 | `session` | `start_session`, `escalate_session`, `get_session`, `get_session_state`, `list_sessions`, `end_session` |
 | `cursor` | `move_cursor`, `set_agent_cursor_enabled`, `set_agent_cursor_motion`, `set_agent_cursor_theme`, `get_agent_cursor_state` |
@@ -98,6 +101,52 @@ Long descriptive text and large lists are shortened with a truncation notice; op
 
 Before typed browser actions such as navigation, clicks, typing, pointer input, file assignment, and downloads, the extension automatically inspects the exact tab's JavaScript dialog state. This establishes the driver's CDP dialog-event subscription before the action can open a modal, so callers do not need to manually inspect first. If a dialog is already open, the action is not dispatched and its current `dialog_id` is returned for `browser_dialog` to resolve. If a dialog opened before this driver ever subscribed and inspection times out, dismiss it manually once before retrying; the extension cannot recover that existing modal through the affected driver path.
 
+### Optional local perception
+
+`parse_visual_regions` uses the separately installed `cua-perception` worker to return OCR text and icon regions from a registered screenshot. It runs locally without Python or a provider API key. Installing `pi-computer-use` downloads the matching perception artifact package by default on supported targets. Enabling the worker in the Driver store remains an explicit confirmed operation; accessibility and browser tools remain usable without it.
+
+Perception has its own release and platform support. [Cua Perception 0.2.1](https://github.com/trycua/cua/releases/tag/cua-perception-v0.2.1) publishes these targets:
+
+| OS / CPU | Release target |
+| --- | --- |
+| macOS ARM64 (Apple Silicon) | `aarch64-apple-darwin` |
+| Linux x64 (glibc) | `x86_64-unknown-linux-gnu` |
+| Windows x64 | `x86_64-pc-windows-msvc` |
+
+There are no published 0.2.1 artifacts for macOS Intel, Linux ARM64, or Windows ARM64. The universal macOS Driver does not imply universal perception support. Select the native target; do not install another architecture's archive.
+
+The approximately 421–426 MB compressed bundle contains the native worker, ONNX Runtime, OmniParser icon detector, PP-OCR text detector/English recognizer, dictionary, notices, and corresponding-source materials. The release identifies the OmniParser detector as AGPL-3.0-only and the PP-OCR artifacts as Apache-2.0; other bundled components retain their own licenses. Read the release's SBOM and [third-party notices](https://github.com/trycua/cua/blob/cua-driver-rs-v0.35.4/libs/cua-driver/docs/perception-third-party-notices.md) before redistribution. These artifacts are not included in this extension's Apache-2.0 package or the default MIT Driver package.
+
+The signed artifacts are distributed as independent platform packages under `platforms/`. They are `optionalDependencies`, like the Driver packages: npm selects the matching OS/CPU package and installs it by default. An unsupported target or omitted optional dependency does not prevent installation of the extension:
+
+| OS / CPU | Optional npm package |
+| --- | --- |
+| macOS ARM64 | `@amaster.ai/pi-computer-use-cua-perception-darwin-arm64` |
+| Linux x64 | `@amaster.ai/pi-computer-use-cua-perception-linux-x64` |
+| Windows x64 | `@amaster.ai/pi-computer-use-cua-perception-win32-x64` |
+
+The platform npm packages start at version `0.1.0`; their `cuaPerceptionVersion` metadata independently records the bundled upstream version `0.2.1`. Users do not need a separate `bun add` command for perception.
+
+The extension resolves the platform package's signed catalog and passes it to its Driver daemon and MCP proxy, including LaunchServices on macOS. No manual GitHub download or environment variable is needed. Activate `/computer-use-tools diagnostics`, then call `computer_use_install_extension({name:"perception"})` to preview the verified publisher, target, size, licenses and source. After reviewing that plan, call `computer_use_install_extension({name:"perception", confirm:true})` to install. The existing Pi dangerous-action confirmation still applies. Downloading the npm artifact package does not activate the worker or run a postinstall script.
+
+The Driver verifies the signed catalog and archive before installing into its user-owned extension store. Use the same user and `CUA_DRIVER_RS_HOME` for installation and parsing. Installs become visible on the next parse without restarting the Driver. A custom reviewed `CUA_DRIVER_PERCEPTION_CATALOG` overrides the package catalog; its original signed archive must be in the same directory. Expired catalogs require a newer published perception release.
+
+For manual/offline installation, download the catalog and matching archive from the upstream release into one directory, then use the existing Driver CLI. Resolve the bundled binary from the project containing `pi-computer-use`:
+
+```bash
+node --input-type=module -e "import { resolveDriverLayout } from '@amaster.ai/pi-computer-use'; console.log(resolveDriverLayout({mode:'bundled'}).binaryPath)"
+```
+
+Run that binary with `extension inspect cua-perception --catalog <catalog.json>`, review the plan, then `extension install cua-perception --catalog <catalog.json>` and `extension status cua-perception --self-test`. The npm package contains the same unmodified catalog/archive pair and all upstream notices and corresponding-source materials inside the archive; signature verification is never bypassed.
+
+Activate `/computer-use-tools diagnostics`, then ask Pi to capture the exact window with `computer_use_get_window_state({pid, window_id, include_screenshot:true})` and pass its returned `capture_id` to `computer_use_parse_visual_regions({capture_id, options:{max_regions:3}})`. Keep both calls on the same Pi connection and repeat the same `session` label if one is used. `snapshot_id` is not a capture ID. The installation plan and parse results are exposed in bounded model-visible text. Parse results include region text/labels/bounds and the capture's action-coordinate transform. A missing extension returns `not_installed`; stale or expired captures require another capture. Do not remove `capture_id` to bypass a rejected pixel action.
+
+Use `extension inspect` before `extension update cua-perception --catalog ...` to change versions. To remove only the Driver-managed installation, run the same binary with `extension remove cua-perception`. See the [upstream lifecycle documentation](https://github.com/trycua/cua/blob/cua-driver-rs-v0.35.4/libs/cua-driver/docs/perception-extension.md) for the complete contract.
+
+Validated on macOS ARM64 with Driver 0.35.4, publisher-verified Perception 0.2.1, and local Pi 1.2.0 + Kimi K3. The main, Driver and perception tarballs were installed with npm into a clean dependency tree. With `CUA_DRIVER_PERCEPTION_CATALOG` unset and an empty Driver store, Pi automatically found the packaged catalog, previewed it, and explicitly installed through `install_extension`. Integrity/self-test and same-connection/session capture → parse passed; OCR matched a randomly generated canvas-only code, with bounded regions and model-visible coordinates. The earlier missing-extension case and 3/10-region limits were also verified. A main-package-only installation against a local registry fixture also automatically installed the matching perception npm package `0.1.0` (upstream `0.2.1`) and exposed its publisher-verified catalog, without explicitly installing the native package. Linux/Windows archives were hash-verified, but native installation and runtime execution have not been tested locally.
+
+For maintainers, `node packages/pi-computer-use/scripts/fetch-perception.mjs <target>` populates each platform package's ignored `artifacts/` directory from `perception-release.json`. The `Publish pi-computer-use Cua Perception` workflow verifies installation/self-test on all three native runners before publishing. The main npm publication workflow exposes `publish_cua_perception` to run this dependency publication first.
+
 ### Optional vision model
 
 ```json
@@ -117,7 +166,7 @@ Before typed browser actions such as navigation, clicks, typing, pointer input, 
 
 Windows daemon status probes allow up to 10 seconds per process invocation, so slow driver initialization is not interrupted after 250 ms. Session cancellation still aborts the probe.
 
-On macOS, `session_start` registers the generated 0.34.0 manifest without starting the driver. The signed app and MCP proxy start lazily on the first computer-use tool call, which requests any missing permissions through `check_permissions({ prompt: true })`. Existing grants do not raise another system dialog. The requested tool still runs and reports its own capability or permission error. Linux and Windows keep eager startup: they discover the exact live `tools/list` surface and call `check_permissions({})` (their schemas accept no parameters). If discovery fails, the extension registers `computer_use_connect` (and `/computer-use-connect`) so a later retry can install the exact live platform contract without advertising another OS's schemas.
+On macOS, `session_start` registers the generated 0.35.4 manifest without starting the driver. The signed app and MCP proxy start lazily on the first computer-use tool call, which requests any missing permissions through `check_permissions({ prompt: true })`. Existing grants do not raise another system dialog. The requested tool still runs and reports its own capability or permission error. Linux and Windows keep eager startup: they discover the exact live `tools/list` surface and call `check_permissions({})` (their schemas accept no parameters). If discovery fails, the extension registers `computer_use_connect` (and `/computer-use-connect`) so a later retry can install the exact live platform contract without advertising another OS's schemas.
 
 Driver startup, reconnect, and the first macOS permission probe are session-owned. Cancelling a tool stops only that caller's wait or MCP request; session shutdown aborts the shared work. macOS and Linux also use a transient pipe-backed lease to stop the owned daemon after an abrupt host exit; no persistent service or system scheduler is installed.
 

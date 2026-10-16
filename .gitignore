@@ -39,3 +39,5 @@ packages/pi-video-gen/platforms/ffmpeg-*/ZLIB_LICENSE.txt
 packages/pi-video-gen/platforms/ffmpeg-*/source/
 .video-gen/
 video-output/
+
+packages/pi-computer-use/platforms/cua-perception-*/artifacts/

@@ -1,0 +1,27 @@
+{
+  "name": "@amaster.ai/pi-computer-use-cua-perception-linux-x64",
+  "version": "0.1.0",
+  "description": "Signed Cua Perception artifacts for pi-computer-use on linux x64",
+  "license": "SEE LICENSE IN SOURCE.md",
+  "files": [
+    "artifacts",
+    "SOURCE.md"
+  ],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "exports": {
+    "./package.json": "./package.json",
+    "./catalog": "./artifacts/cua-perception-0.2.1-x86_64-unknown-linux-gnu.catalog.json"
+  },
+  "cuaPerceptionVersion": "0.2.1",
+  "publishConfig": {
+    "access": "public"
+  },
+  "libc": [
+    "glibc"
+  ]
+}

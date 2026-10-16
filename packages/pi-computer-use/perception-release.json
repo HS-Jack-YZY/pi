@@ -1,0 +1,27 @@
+{
+  "version": "0.2.1",
+  "tag": "cua-perception-v0.2.1",
+  "targets": {
+    "darwin-arm64": {
+      "catalog": "cua-perception-0.2.1-aarch64-apple-darwin.catalog.json",
+      "catalogSha256": "d20c1e1cbf5d90cfa85b956100846c2c7a43c387fdc5b344d75a15f91498aa42",
+      "archive": "cua-perception-0.2.1-aarch64-apple-darwin.tar.gz",
+      "archiveSha256": "5fbcf59c15fc5cd8beca6ac4aa5533c34359054810aceb12c9e26d7a45e750ab",
+      "archiveSize": 426075949
+    },
+    "linux-x64": {
+      "catalog": "cua-perception-0.2.1-x86_64-unknown-linux-gnu.catalog.json",
+      "catalogSha256": "853759659a7a9d77aa246bc6f083c6e939a9ce92899f1acd55c80e9345e1070b",
+      "archive": "cua-perception-0.2.1-x86_64-unknown-linux-gnu.tar.gz",
+      "archiveSha256": "b4d76b626df9ce1a48b8036f7313412525295d0cb818d82ecbe3d9cca5fd1d08",
+      "archiveSize": 424300011
+    },
+    "win32-x64": {
+      "catalog": "cua-perception-0.2.1-x86_64-pc-windows-msvc.catalog.json",
+      "catalogSha256": "bfb2300ff9da054d522e73351f7b337ba6157ebbe30f029a95a471fc3d13a042",
+      "archive": "cua-perception-0.2.1-x86_64-pc-windows-msvc.tar.gz",
+      "archiveSha256": "6709579aa3f938e8200c0a51b1abe450d4fda51b09e97517e0cb4c272b5bff37",
+      "archiveSize": 421313686
+    }
+  }
+}
