@@ -1,5 +1,8 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CuaDriverClient,
   resolveBundledTarget,
@@ -65,6 +68,45 @@ describe('CuaDriverClient', () => {
       '/tmp/pi-cua-123-deadbeef.sock',
     );
     expect(Buffer.byteLength(resolveUnixSocketPath('/tmp', '123-deadbeef'))).toBeLessThan(91);
+  });
+
+  describe('status process', () => {
+    let dir: string;
+
+    beforeEach(async () => {
+      dir = await mkdtemp(path.join(tmpdir(), 'pi-computer-use-status-'));
+      const preload = path.join(dir, 'slow-status.cjs');
+      await writeFile(
+        preload,
+        'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000); process.exit(0);',
+      );
+      vi.stubEnv(
+        'NODE_OPTIONS',
+        `${process.env.NODE_OPTIONS ?? ''} --require=${JSON.stringify(preload)}`,
+      );
+    });
+
+    afterEach(async () => {
+      vi.unstubAllEnvs();
+      await rm(dir, { recursive: true, force: true });
+    });
+
+    it('allows a slow status process to finish initializing', async () => {
+      await waitForDaemonStatus(process.execPath, path.join(dir, 'daemon.sock'));
+    }, 15_000);
+
+    it('aborts an in-flight status process when the session is cancelled', async () => {
+      const controller = new AbortController();
+      const reason = new Error('session stopped');
+      const timer = setTimeout(() => controller.abort(reason), 100);
+      try {
+        await expect(
+          waitForDaemonStatus(process.execPath, path.join(dir, 'daemon.sock'), controller.signal),
+        ).rejects.toBe(reason);
+      } finally {
+        clearTimeout(timer);
+      }
+    });
   });
 
   it('waits until the Windows daemon responds before opening the MCP proxy', async () => {
@@ -136,6 +178,21 @@ describe('CuaDriverClient', () => {
 });
 
 describe('sanitizeSchemaFormats', () => {
+  it('adds explicit string enum types without changing nullable enums or instance data', () => {
+    const schema = {
+      properties: {
+        kinds: { type: 'array', items: { enum: ['text', 'icon'] } },
+        nullable: { enum: ['text', null] },
+      },
+      default: { enum: ['keep', 'unchanged'] },
+    };
+    const result = sanitizeSchemaFormats(schema);
+    expect(result.properties.kinds.items).toEqual({ type: 'string', enum: ['text', 'icon'] });
+    expect(result.properties.nullable).toEqual({ enum: ['text', null] });
+    expect(result.default).toEqual(schema.default);
+    expect(schema.properties.kinds.items).toEqual({ enum: ['text', 'icon'] });
+  });
+
   it.each([
     ['int8', { minimum: -128, maximum: 127 }],
     ['int16', { minimum: -32_768, maximum: 32_767 }],

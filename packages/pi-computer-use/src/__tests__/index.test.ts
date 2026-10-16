@@ -150,6 +150,7 @@ interface RegisteredTool {
   exposure?: string;
   name: string;
   description: string;
+  parameters?: { properties?: Record<string, unknown> };
   execute: (
     id: string,
     params: Record<string, unknown>,
@@ -254,6 +255,25 @@ describe('computerUseExtension', () => {
     expect(tools.has('computer_use_screenshot')).toBe(false);
   });
 
+  it('declares the visual parser kinds union as an explicit array for model providers', async () => {
+    await start();
+
+    expect(tools.get('computer_use_parse_visual_regions')?.parameters).toMatchObject({
+      properties: {
+        options: {
+          properties: {
+            kinds: {
+              anyOf: [
+                { type: 'array', items: { type: 'string', enum: ['text', 'icon'] } },
+                { type: 'null' },
+              ],
+            },
+          },
+        },
+      },
+    });
+  });
+
   it('does not start the macOS driver to discover its live schema', async () => {
     let connects = 0;
     mockConnect = async () => {
@@ -272,6 +292,141 @@ describe('computerUseExtension', () => {
     expect(connects).toBe(0);
     expect(tools.has('computer_use_platform_specific_tool')).toBe(false);
     expect(tools.has('computer_use_click')).toBe(true);
+  });
+
+  it.each([
+    'browser_click',
+    'browser_type',
+    'browser_navigate',
+    'browser_pointer',
+    'browser_set_input_files',
+    'browser_download',
+  ])('subscribes to dialogs before %s can open one', async (name) => {
+    const calls: Array<{
+      name: string;
+      args: Record<string, unknown>;
+      signal: AbortSignal | undefined;
+    }> = [];
+    const signal = new AbortController().signal;
+    await start({ confirmDangerousActions: false });
+    mockCallTool = (tool, args, signal) => {
+      calls.push({ name: tool, args, signal });
+      return tool === 'browser_dialog'
+        ? { structuredContent: { status: 'ok', present: false } }
+        : { content: [{ type: 'text', text: 'ok' }] };
+    };
+    await tools.get(`computer_use_${name}`)!.execute(
+      'action',
+      {
+        session: 'test-session',
+        target_id: 'bt-123',
+        tab_id: 'tab-456',
+      },
+      signal,
+      undefined,
+      mockCtx,
+    );
+    const browserCalls = calls.filter((call) => call.name.startsWith('browser_'));
+    expect(browserCalls.map((call) => call.name)).toEqual(['browser_dialog', name]);
+    expect(browserCalls[0]).toEqual({
+      name: 'browser_dialog',
+      args: {
+        session: 'test-session',
+        target_id: 'bt-123',
+        tab_id: 'tab-456',
+        action: 'inspect',
+      },
+      signal,
+    });
+  });
+
+  it('returns the current dialog capability without dispatching a blocked browser action', async () => {
+    const calls: string[] = [];
+    await start();
+    mockCallTool = (name) => {
+      calls.push(name);
+      return name === 'browser_dialog'
+        ? {
+            content: [{ type: 'text', text: 'confirm dialog is open' }],
+            structuredContent: {
+              status: 'ok',
+              present: true,
+              dialog_id: 'dialog-41',
+              kind: 'confirm',
+            },
+          }
+        : { content: [{ type: 'text', text: 'ok' }] };
+    };
+    const result = await tools.get('computer_use_browser_click')!.execute(
+      'action',
+      {
+        target_id: 'bt-123',
+        tab_id: 'tab-456',
+      },
+      undefined,
+      undefined,
+      mockCtx,
+    );
+    expect(result).toMatchObject({ isError: true });
+    expect(calls).not.toContain('browser_click');
+    expect(JSON.stringify(result)).toContain('dialog-41');
+    expect(result).toMatchObject({
+      content: expect.arrayContaining([
+        { type: 'text', text: expect.stringContaining('dialog-41') },
+      ]),
+    });
+  });
+
+  it('stops before dispatch when dialog observation is cancelled', async () => {
+    const controller = new AbortController();
+    const reason = new Error('session stopped');
+    const calls: string[] = [];
+    await start();
+    mockCallTool = (name) => {
+      calls.push(name);
+      if (name === 'browser_dialog') {
+        controller.abort(reason);
+        throw reason;
+      }
+      return { content: [{ type: 'text', text: 'ok' }] };
+    };
+    await expect(
+      tools.get('computer_use_browser_click')!.execute(
+        'action',
+        {
+          target_id: 'bt-123',
+          tab_id: 'tab-456',
+        },
+        controller.signal,
+        undefined,
+        mockCtx,
+      ),
+    ).rejects.toBe(reason);
+    expect(calls).not.toContain('browser_click');
+  });
+
+  it('does not dispatch a browser action when dialog observation is refused', async () => {
+    const calls: string[] = [];
+    await start();
+    mockCallTool = (name) => {
+      calls.push(name);
+      return {
+        content: [{ type: 'text', text: 'dialog observation unavailable' }],
+        structuredContent: { code: 'browser_action_unavailable' },
+      };
+    };
+    const result = await tools.get('computer_use_browser_click')!.execute(
+      'action',
+      {
+        target_id: 'bt-123',
+        tab_id: 'tab-456',
+      },
+      undefined,
+      undefined,
+      mockCtx,
+    );
+    expect(result).toMatchObject({ isError: true });
+    expect(calls).not.toContain('browser_click');
   });
 
   it('requests macOS permissions once on the first computer-use call', async () => {
