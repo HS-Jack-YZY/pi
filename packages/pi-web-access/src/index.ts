@@ -171,6 +171,11 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
           '- Provides up-to-date information for current events and recent data',
           '- Returns search results with titles, URLs, and content snippets, or a synthesized answer',
           '- Use this tool for accessing information beyond your knowledge cutoff',
+          ...(searchResolved.id === 'deepseek'
+            ? [
+                '- DeepSeek queries, including domain and date filters, must fit within 128 Unicode characters. Returns sources without a synthesized answer; topic is ignored.',
+              ]
+            : []),
           ...(searchResolved.id === 'cloudflare'
             ? [
                 '- Cloudflare returns at most 10 results and ignores topic, timeRange, includeDomains, and excludeDomains.',
@@ -247,6 +252,41 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
     }
 
     if (hasFetch) {
+      const runFetch = async (
+        fetchParams: { url: string; prompt: string },
+        fetchCtx: ExtensionContext,
+        signal?: AbortSignal,
+      ) => {
+        const result = await webFetch({ url: fetchParams.url }, settings, undefined, signal);
+
+        let content = result.content;
+        if (settings.fetch?.summary) {
+          content = await summarizeContent(
+            content,
+            fetchParams.prompt,
+            settings.fetch.summary,
+            fetchCtx,
+            signal,
+          );
+        }
+
+        const lines: string[] = [];
+        lines.push(`## ${result.title}`);
+        lines.push(`**Source:** ${result.url}`);
+        lines.push('');
+        lines.push(content);
+
+        const structuredContent = fetchOutput({ url: result.url, title: result.title, content });
+        if (structuredContent.truncated)
+          lines.unshift('[Result truncated: some content was omitted.]');
+        const text = boundText(lines.join('\n'));
+        return {
+          content: [{ type: 'text' as const, text }],
+          details: undefined,
+          structuredContent,
+        };
+      };
+
       registerTool({
         name: 'web_fetch',
         outputSchema: fetchOutputSchema,
@@ -273,35 +313,31 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
           _onUpdate: unknown,
           fetchCtx: ExtensionContext,
         ) {
-          const fetchParams = params as unknown as { url: string; prompt: string };
-          const result = await webFetch({ url: fetchParams.url }, settings, undefined, signal);
-
-          let content = result.content;
-          if (settings.fetch?.summary) {
-            content = await summarizeContent(
-              content,
-              fetchParams.prompt,
-              settings.fetch.summary,
-              fetchCtx,
-              signal,
+          return runFetch(params as unknown as { url: string; prompt: string }, fetchCtx, signal);
+        },
+      });
+      pi.registerCommand('web-fetch', {
+        description: 'Fetch a public URL: /web-fetch <url> [extraction instructions]',
+        async handler(args, cmdCtx) {
+          const [url, ...instructions] = args.trim().split(/\s+/);
+          if (!url) {
+            cmdCtx.ui.notify('Usage: /web-fetch <url> [extraction instructions]', 'warning');
+            return;
+          }
+          try {
+            const result = await runFetch(
+              { url, prompt: instructions.join(' ') || 'Summarize this page.' },
+              cmdCtx,
+              cmdCtx.signal,
+            );
+            cmdCtx.ui.notify(result.content[0]!.text, 'info');
+          } catch {
+            console.error('[pi-web-access] web-fetch command failed');
+            cmdCtx.ui.notify(
+              'Web fetch failed. Check the URL and provider configuration.',
+              'error',
             );
           }
-
-          const lines: string[] = [];
-          lines.push(`## ${result.title}`);
-          lines.push(`**Source:** ${result.url}`);
-          lines.push('');
-          lines.push(content);
-
-          const structuredContent = fetchOutput({ url: result.url, title: result.title, content });
-          if (structuredContent.truncated)
-            lines.unshift('[Result truncated: some content was omitted.]');
-          const text = boundText(lines.join('\n'));
-          return {
-            content: [{ type: 'text' as const, text }],
-            details: undefined,
-            structuredContent,
-          };
         },
       });
     }

@@ -4,6 +4,7 @@ import type { WebProvider } from './base.js';
 import { BraveProvider } from './brave.js';
 import { CloudflareProvider } from './cloudflare.js';
 import { DashscopeProvider } from './dashscope.js';
+import { DeepSeekProvider } from './deepseek.js';
 import { FirecrawlProvider } from './firecrawl.js';
 import { GeminiProvider } from './gemini.js';
 import { KimiProvider } from './kimi.js';
@@ -45,7 +46,7 @@ const providers: WebProvider[] = [
   new OpenRouterProvider(),
   new XaiProvider(),
   new OpenAIProvider(),
-  new OpenAIProvider('deepseek'),
+  new DeepSeekProvider(),
   new AnthropicProvider(),
   new DashscopeProvider(),
   new UnsplashProvider(),

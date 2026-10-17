@@ -21,7 +21,7 @@ Search the web for information. Also available via `/web-search <query>`. Regist
 
 ### `web_fetch`
 
-Fetch a URL and return its content. When `fetch.summary` is configured, the summary model processes the content using `prompt`; otherwise the fetched content is returned directly and `prompt` is retained for compatibility but ignored. Only registered when `fetch.provider` or `fetch.summary` is configured.
+Fetch a URL and return its content. Also available via `/web-fetch <url> [extraction instructions]`; instructions default to “Summarize this page.” when omitted. When `fetch.summary` is configured, the summary model processes the content using `prompt`; otherwise the fetched content is returned directly and `prompt` is retained for compatibility but ignored. Only registered when `fetch.provider` or `fetch.summary` is configured.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -68,7 +68,7 @@ Results are bounded and `truncated` indicates shortened text or omitted sources;
 | `zai` | ✓ | ✓ | ✗ | ✗ | `https://api.z.ai` | `ZAI_API_KEY` | - |
 | `gemini` | ✓ | ✗ | ✗ | ✗ | `https://generativelanguage.googleapis.com/v1beta` | `GEMINI_API_KEY` | `gemini-2.5-flash` |
 | `perplexity` | ✓ | ✓ | ✗ | ✗ | `https://api.perplexity.ai` | `PERPLEXITY_API_KEY` | `openai/gpt-5.5` |
-| `deepseek` | ✓ | ✗ | ✗ | ✗ | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` | `deepseek-v4-flash` |
+| `deepseek` | ✓ | ✓ | ✗ | ✗ | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` | - |
 | `openrouter` | ✓ | ✓ | ✗ | ✗ | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | `openai/gpt-4.1-mini` |
 | `xai` | ✓ | ✗ | ✓ | ✗ | `https://api.x.ai/v1` | `XAI_API_KEY` | `grok-4.3` |
 | `openai` | ✓ | ✗ | ✗ | ✗ | `https://api.openai.com/v1` | `OPENAI_API_KEY` | `gpt-5.5` |
@@ -76,6 +76,12 @@ Results are bounded and `truncated` indicates shortened text or omitted sources;
 | `dashscope` | ✓ | ✓ | ✗ | ✓ | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` | `qwen3.8-flash` |
 | `unsplash` | ✗ | ✗ | ✗ | ✓ | `https://api.unsplash.com` | `UNSPLASH_ACCESS_KEY` | - |
 | `you` | ✓ | ✓ | ✗ | ✗ | `https://ydc-index.io` | `YDC_API_KEY` | - |
+
+### DeepSeek Search and Fetch
+
+DeepSeek uses the [Search and Fetch APIs](https://api-docs.deepseek.com/zh-cn/guides/search/): `POST /v1/tools/search` returns ranked sources with long summaries, and `POST /v1/tools/fetch` returns Markdown. Set `search.provider` and/or `fetch.provider` to `"deepseek"` and supply `DEEPSEEK_API_KEY` or `providers.deepseek.apiKey`. Existing DeepSeek settings continue to work; `model` is ignored and search no longer returns a synthesized `answer`. Both root and `/v1` base URLs are supported.
+
+Search requests use `count` (default 5, API limit 50) and `need_content: false`; fetch a result URL for its full body. Domain filters become `site:` / `-site:` syntax, and `timeRange` becomes an `after:YYYY-MM-DD` filter (1/7/30/365 days, UTC). The complete query, including filters, must contain 1–128 Unicode characters. `topic` is ignored; use query terms to search for news. Raw DeepSeek search syntax can also be included directly in the query.
 
 ### Cloudflare Web Search
 
@@ -218,7 +224,7 @@ Providers only override methods they support. Provider-specific capabilities (li
 ## Tool Registration Rules
 
 - `web_search` and `/web-search <query>` — registered when a search provider has an API key, or when keyless `parallel` is explicitly selected.
-- `web_fetch` — registered when `fetch.provider` or `fetch.summary` is configured.
+- `web_fetch` and `/web-fetch <url> [extraction instructions]` — registered when `fetch.provider` or `fetch.summary` is configured.
 - `x_search` — registered when xai provider has an API key.
 - `image_search` — registered when an image search provider (dashscope, unsplash) has an API key; `/image-search` command is registered alongside it. An `imageSearch.provider` that doesn't support image search (e.g. `"openai"`) is treated as unconfigured.
 - If none are configured, the extension loads silently with no tools registered.

@@ -10,7 +10,6 @@ const DEFAULT_TIMEOUT_MS = 60_000;
 
 const VARIANTS = {
   openai: { name: 'OpenAI', envVar: 'OPENAI_API_KEY', model: 'gpt-5.5' },
-  deepseek: { name: 'DeepSeek', envVar: 'DEEPSEEK_API_KEY', model: 'deepseek-v4-flash' },
   dashscope: { name: 'DashScope', envVar: 'DASHSCOPE_API_KEY', model: 'qwen3.8-flash' },
 } as const;
 
@@ -143,8 +142,7 @@ export class OpenAIProvider extends BaseProvider {
           }
         }
       }
-      // DeepSeek never emits url_citation annotations; opened pages are the only source trail.
-      // DeepSeek appends a tracking fragment (#ws_call_id=...) that must be stripped.
+      // Preserve sources from opened pages when no citation annotations are returned.
       if (
         item.type === 'web_search_call' &&
         item.status !== 'failed' &&

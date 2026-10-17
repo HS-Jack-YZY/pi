@@ -142,7 +142,7 @@ describe('resolveProvider', () => {
     }
   });
 
-  it('resolves deepseek with env var and default model', () => {
+  it('resolves deepseek with env var and no model', () => {
     process.env.DEEPSEEK_API_KEY = 'test-deepseek-key';
     const result = resolveProvider('deepseek', {});
     expect(result).not.toHaveProperty('error');
@@ -150,7 +150,7 @@ describe('resolveProvider', () => {
       expect(result.id).toBe('deepseek');
       expect(result.baseUrl).toBe('https://api.deepseek.com');
       expect(result.apiKey).toBe('test-deepseek-key');
-      expect(result.model).toBe('deepseek-v4-flash');
+      expect(result.model).toBeUndefined();
     }
   });
 

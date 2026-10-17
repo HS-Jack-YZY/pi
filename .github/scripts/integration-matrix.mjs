@@ -89,16 +89,17 @@ export const fullMatrix = [
     prompt: 'Use workspace_list to fetch teamwork workspaces, then tell me the names of the workspaces. Call the tool exactly once.',
     assert_pattern: '(workspace|name|id)',
   },
-  {
-    extension: 'pi-web-access',
-    provider: 'deepseek',
-    tools: 'web_search,web_fetch',
-    prompt: "Step 1 — use web_search exactly once with query='DeepSeek API documentation'. Step 2 — use web_fetch exactly once on https://example.com. Report the search provider and fetched page title in one sentence.",
-    assert_pattern: 'Example Domain',
-    assert_tool: 'web_search',
-    assert_tool_pattern: 'Web Search Results.*deepseek',
-    assert_tool_count: 1,
-  },
+  // Temporarily disabled until the integration gateway supports DeepSeek Search/Fetch APIs.
+  // {
+  //   extension: 'pi-web-access',
+  //   provider: 'deepseek',
+  //   tools: 'web_search,web_fetch',
+  //   prompt: "Step 1 — use web_search exactly once with query='DeepSeek API documentation'. Step 2 — use web_fetch exactly once on https://example.com. Report the search provider and fetched page title in one sentence.",
+  //   assert_pattern: 'Example Domain',
+  //   assert_tool: 'web_search',
+  //   assert_tool_pattern: 'Web Search Results.*deepseek',
+  //   assert_tool_count: 1,
+  // },
   {
     extension: 'pi-web-access',
     provider: 'firecrawl',

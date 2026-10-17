@@ -364,10 +364,10 @@ describe('search', () => {
     expect(result.results[0]!.url).toBe('https://example.com');
   });
 
-  it('uses search.provider deepseek with Responses API web search', async () => {
+  it('uses search.provider openai with Responses API web search', async () => {
     const settings: WebToolSettings = {
-      search: { provider: 'deepseek' },
-      providers: { deepseek: { apiKey: 'deepseek-key' } },
+      search: { provider: 'openai' },
+      providers: { openai: { apiKey: 'openai-key' } },
     };
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -378,7 +378,7 @@ describe('search', () => {
             content: [
               {
                 type: 'output_text',
-                text: 'DeepSeek answer',
+                text: 'OpenAI answer',
                 annotations: [
                   { type: 'url_citation', url: 'https://example.com', title: 'Example' },
                 ],
@@ -392,27 +392,27 @@ describe('search', () => {
     const result = await search({ query: 'test query' }, settings);
 
     expect(result).toEqual({
-      provider: 'deepseek',
+      provider: 'openai',
       query: 'test query',
-      answer: 'DeepSeek answer',
+      answer: 'OpenAI answer',
       results: [{ title: 'Example', url: 'https://example.com', content: '' }],
     });
     const [url, options] = mockFetch.mock.calls[0]!;
-    expect(url).toBe('https://api.deepseek.com/responses');
-    expect(options.headers.Authorization).toBe('Bearer deepseek-key');
+    expect(url).toBe('https://api.openai.com/v1/responses');
+    expect(options.headers.Authorization).toBe('Bearer openai-key');
     expect(JSON.parse(options.body)).toEqual(
       expect.objectContaining({
-        model: 'deepseek-v4-flash',
+        model: 'gpt-5.5',
         tools: [{ type: 'web_search' }],
       }),
     );
   });
 
-  it('extracts deepseek sources from web_search_call actions when no message is returned', async () => {
+  it('extracts openai sources from web_search_call actions when no message is returned', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const settings: WebToolSettings = {
-      search: { provider: 'deepseek' },
-      providers: { deepseek: { apiKey: 'deepseek-key' } },
+      search: { provider: 'openai' },
+      providers: { openai: { apiKey: 'openai-key' } },
     };
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -446,7 +446,7 @@ describe('search', () => {
 
     const result = await search({ query: 'obscure research query' }, settings);
 
-    expect(result.provider).toBe('deepseek');
+    expect(result.provider).toBe('openai');
     expect(result.answer).toBeUndefined();
     // deduped, fragment stripped, failed open_page excluded
     expect(result.results).toEqual([
@@ -457,8 +457,8 @@ describe('search', () => {
 
   it('prefers annotation titles when deduping sources across items', async () => {
     const settings: WebToolSettings = {
-      search: { provider: 'deepseek' },
-      providers: { deepseek: { apiKey: 'deepseek-key' } },
+      search: { provider: 'openai' },
+      providers: { openai: { apiKey: 'openai-key' } },
     };
     // Realistic ordering: web_search_call items precede the message item.
     mockFetch.mockResolvedValueOnce({
@@ -490,11 +490,11 @@ describe('search', () => {
     expect(result.results).toEqual([{ title: 'A', url: 'https://example.com/a', content: '' }]);
   });
 
-  it('throws when deepseek response status is failed', async () => {
+  it('throws when openai response status is failed', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const settings: WebToolSettings = {
-      search: { provider: 'deepseek' },
-      providers: { deepseek: { apiKey: 'deepseek-key' } },
+      search: { provider: 'openai' },
+      providers: { openai: { apiKey: 'openai-key' } },
     };
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -506,9 +506,9 @@ describe('search', () => {
     });
 
     await expect(search({ query: 'test' }, settings)).rejects.toThrow(
-      'DeepSeek API response failed.',
+      'OpenAI API response failed.',
     );
-    expect(consoleError).toHaveBeenCalledWith('[pi-web-access] DeepSeek response failed');
+    expect(consoleError).toHaveBeenCalledWith('[pi-web-access] OpenAI response failed');
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain('internal error');
   });
 
@@ -528,7 +528,7 @@ describe('search', () => {
     try {
       await search(
         { query: 'test' },
-        { search: { provider: 'deepseek' }, providers: { deepseek: { apiKey: 'fixture' } } },
+        { search: { provider: 'openai' }, providers: { openai: { apiKey: 'fixture' } } },
       ).catch(() => {});
       expect(log).toHaveBeenCalled();
       expect(JSON.stringify(log.mock.calls)).not.toContain('private-token');
@@ -537,11 +537,11 @@ describe('search', () => {
     }
   });
 
-  it('throws when deepseek response is incomplete with no message', async () => {
+  it('throws when openai response is incomplete with no message', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const settings: WebToolSettings = {
-      search: { provider: 'deepseek' },
-      providers: { deepseek: { apiKey: 'deepseek-key' } },
+      search: { provider: 'openai' },
+      providers: { openai: { apiKey: 'openai-key' } },
     };
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -553,7 +553,7 @@ describe('search', () => {
     });
 
     await expect(search({ query: 'test' }, settings)).rejects.toThrow(
-      'DeepSeek API response did not produce an answer (status: incomplete).',
+      'OpenAI API response did not produce an answer (status: incomplete).',
     );
     expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('max_output_tokens'));
   });
@@ -561,8 +561,8 @@ describe('search', () => {
   it('caps extracted sources at maxResults', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const settings: WebToolSettings = {
-      search: { provider: 'deepseek' },
-      providers: { deepseek: { apiKey: 'deepseek-key' } },
+      search: { provider: 'openai' },
+      providers: { openai: { apiKey: 'openai-key' } },
     };
     mockFetch.mockResolvedValueOnce({
       ok: true,
