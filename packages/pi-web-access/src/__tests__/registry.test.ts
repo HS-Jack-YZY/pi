@@ -68,7 +68,6 @@ describe('getProvider registry', () => {
       'gemini',
       'xai',
       'openai',
-      'deepseek',
       'unsplash',
     ];
     for (const id of fetchUnsupported) {

@@ -52,7 +52,6 @@ const DEFAULT_MODEL: Partial<Record<BuiltInProviderId, string>> = {
   mimo: 'mimo-v2.5-pro',
   gemini: 'gemini-2.5-flash',
   perplexity: 'openai/gpt-5.5',
-  deepseek: 'deepseek-v4-flash',
   xai: 'grok-4.3',
   openai: 'gpt-5.5',
   anthropic: 'claude-sonnet-4-6',

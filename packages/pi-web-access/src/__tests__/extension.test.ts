@@ -323,6 +323,42 @@ describe('piWebToolExtension - tool registration', () => {
     );
   });
 
+  it('offers web-fetch with bounded output and sanitized failures', async () => {
+    mockLoadSettings.mockReturnValue({
+      fetch: { provider: 'deepseek' },
+      providers: { deepseek: { apiKey: 'fixture' } },
+    });
+    const request = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ title: 'Page', content: 'Body'.repeat(20000) }),
+    });
+    vi.stubGlobal('fetch', request);
+    const pi = createMockPi();
+    piWebToolExtension(pi as any);
+    await pi.triggerSessionStart();
+    const command = pi.commands.get('web-fetch') as {
+      handler: (args: string, ctx: any) => Promise<void>;
+    };
+    const notify = vi.fn();
+    await command.handler('', { ui: { notify } });
+    expect(notify).toHaveBeenLastCalledWith(expect.stringContaining('Usage:'), 'warning');
+    await command.handler('https://93.184.216.34 Explain this page', { ui: { notify } });
+    expect(notify).toHaveBeenLastCalledWith(expect.stringContaining('Page'), 'info');
+    expect(Buffer.byteLength(notify.mock.calls.at(-1)![0])).toBeLessThan(20000);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      request.mockRejectedValueOnce(new Error('private-token'));
+      await command.handler('https://93.184.216.34', { ui: { notify } });
+      expect(notify).toHaveBeenLastCalledWith(
+        'Web fetch failed. Check the URL and provider configuration.',
+        'error',
+      );
+      expect(JSON.stringify(log.mock.calls)).not.toContain('private-token');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it('registers web_fetch when fetch.summary is configured (no fetch.provider)', async () => {
     mockLoadSettings.mockReturnValue({
       fetch: { summary: { provider: 'amaster', model: 'deepseek-v4-flash' } },

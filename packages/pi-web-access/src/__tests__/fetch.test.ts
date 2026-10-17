@@ -31,6 +31,7 @@ describe('webFetch', () => {
   });
 
   it.each([
+    'deepseek',
     'zai',
     'tavily',
     'dashscope',
