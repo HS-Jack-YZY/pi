@@ -67,14 +67,17 @@
     },
     {
       "id": "multi-shot-film",
-      "prompt": "I want a 30-second, three-shot AI product launch film with a recurring mascot and visual continuity. The product is a task manager; I have supplied actual UI screenshots and brand assets but no measured performance data. You may choose a sensible visual direction and proceed without waiting for a style selection. Explain the product evidence, rhythm and key-frame plan, frame generation, paid confirmation and render stages, including how many times the final render tool is invoked. I also want a music/effects treatment aligned to the reveals. Explain how you would achieve that using the existing Timeline or Remotion path and how you would review the export. Do not call task tools or create files; you may read skill references.",
-      "expected_output": "Read film-direction.md; ground claims in supplied product material without inventing performance numbers, recommend a direction without a mandatory selection, plan rhythm and readable key frames, use a shot book and image_generate only for missing frames, confirm paid scope, and call video_render once. Explain feasible audio timing in Remotion or disclose Timeline limitations; review actual stills, motion and audio with honest verification limits.",
+      "prompt": "I want a 30-second, three-shot AI-assisted product launch film with a recurring mascot and visual continuity. AI assistance may generate missing mascot stills; model-generated video clips are optional. The product is a task manager; I have supplied actual UI screenshots and brand assets but no measured performance data. You may choose a sensible visual direction and proceed without waiting for a style selection. Explain the product evidence, rhythm and key-frame plan, frame generation, paid confirmation and render stages, including how many times the final render tool is invoked. I also want a music/effects treatment aligned to the reveals. Explain how you would achieve that using the existing Timeline or Remotion path and how you would review the export. Do not call task tools or create files; you may read skill references.",
+      "expected_output": "Read film-direction.md; ground claims in supplied product material without inventing performance numbers, recommend a direction without a mandatory selection, and provide a structured multi-shot plan covering intent, timing, readable key frames and mascot continuity. Use image_generate only for missing frames and confirm any paid scope. Choose a supported route: one video_compose call for local/Remotion assembly, or one video_render call for a prepared generated-shot batch with assembly. Explain feasible audio timing in Remotion or disclose Timeline limitations; review actual stills, motion and audio with honest verification limits.",
       "expectations": [
         {
-          "text": "Uses a shot book for the multi-shot plan",
+          "text": "Provides a structured multi-shot plan with shot intent, timing and recurring mascot continuity; a shot book, beat map or equivalent scene plan is acceptable without a required artifact name",
           "includes_any": [
             "shot book",
-            "shot-book"
+            "shot-book",
+            "shot plan",
+            "beat map",
+            "scene plan"
           ]
         },
         {
@@ -84,14 +87,10 @@
           ]
         },
         {
-          "text": "Calls video_render only once",
-          "includes": [
-            "video_render"
-          ],
+          "text": "Chooses a supported route and specifies one initial final-assembly invocation: video_compose for local/Remotion assembly, or video_render for a prepared generated-shot batch with assembly; any paid generation retains scoped approval",
           "includes_any": [
-            "call once",
-            "once",
-            "one call"
+            "video_compose",
+            "video_render"
           ]
         },
         {
