@@ -133,7 +133,7 @@ export function gradeExpectations(answer, expectations, verdictText) {
     if (!verdict || typeof verdict.passed !== 'boolean' || typeof verdict.evidence !== 'string' ||
         !verdict.evidence.trim() || verdict.evidence.length > 2000 ||
         (verdict.passed && !answer.includes(verdict.evidence))) {
-      throw new Error('judge verdict requires grounded evidence');
+      throw Object.assign(new Error('judge verdict requires grounded evidence'), { expectationIndex: i });
     }
     return { text: expectation.text, passed: verdict.passed, evidence: verdict.evidence };
   });
@@ -449,6 +449,7 @@ function writeRun(workspace, evalItem, configuration, runNumber, run) {
           error: run.error,
           diagnostics: run.diagnostics,
           judge_diagnostics: run.judge_diagnostics,
+          judge_attempts: run.judge_attempts,
         },
         timing: { total_duration_seconds: run.duration_ms / 1000 },
       },
@@ -522,6 +523,7 @@ function buildBenchmark({ skill, skillPath, type, runs, runCount, gate, baseEval
         errors: run.failure_mode === 'ok' ? 0 : 1,
         diagnostics: run.diagnostics,
         judge_diagnostics: run.judge_diagnostics,
+        judge_attempts: run.judge_attempts,
       },
       expectations: run.grading.expectations,
       notes: run.error ? [run.error] : [],
@@ -575,24 +577,44 @@ async function evaluateSkill({ change, base, head, tempRoot, outputRoot, cwd, ru
         if (!result) continue;
         let grading;
         if (result.failure_mode === 'ok') {
+          const safeErrors = ['judge returned invalid JSON', 'judge verdict count must match expectations', 'judge verdict requires grounded evidence'];
           try {
             if (evalItem.mode === 'tools') grading = gradeTrace(result.calls, evalItem.expectations);
             else {
-              const verdict = await runPi({ cwd, timeoutMs, judge: true, prompt: JSON.stringify({
-                request: evalItem.prompt, expected_output: evalItem.expected_output,
-                requirements: evalItem.expectations, answer: result.answer,
-              }) });
-              result.judge_diagnostics = verdict.diagnostics;
-              if (verdict.failure_mode !== 'ok') {
-                result.error = `Semantic judge: ${verdict.error}`;
-                throw new Error('judge failed');
+              let gradingFeedback;
+              result.judge_attempts = [];
+              for (let attempt = 0; attempt < 2; attempt++) {
+                const verdict = await runPi({ cwd, timeoutMs, judge: true, prompt: JSON.stringify({
+                  request: evalItem.prompt, expected_output: evalItem.expected_output,
+                  requirements: evalItem.expectations, answer: result.answer,
+                  grading_feedback: gradingFeedback,
+                }) });
+                result.judge_diagnostics = verdict.diagnostics;
+                const diagnostics = { diagnostics: verdict.diagnostics };
+                result.judge_attempts.push(diagnostics);
+                if (verdict.failure_mode !== 'ok') {
+                  result.error = `Semantic judge: ${verdict.error}`;
+                  diagnostics.error = result.error;
+                  throw new Error('judge failed');
+                }
+                try {
+                  grading = gradeExpectations(result.answer, evalItem.expectations, verdict.answer);
+                  break;
+                } catch (error) {
+                  if (!safeErrors.includes(error?.message)) throw error;
+                  diagnostics.error = error.message;
+                  diagnostics.expectationIndex = error.expectationIndex;
+                  if (attempt === 1) throw error;
+                  gradingFeedback = {
+                    error: error.message, expectationIndex: error.expectationIndex,
+                    instruction: 'Correct only the invalid grading response for the same answer. Return one verdict per requirement. For each passed verdict, use a short exact contiguous substring of answer as evidence; preserve its characters and whitespace without paraphrasing or ellipses. Assess every requirement on its merits; do not change criteria or invent evidence to pass validation.',
+                  };
+                }
               }
-              grading = gradeExpectations(result.answer, evalItem.expectations, verdict.answer);
             }
           } catch (error) {
             result.failure_mode = 'crash';
             // Only expose fixed diagnostics, never raw parser errors or judge output.
-            const safeErrors = ['judge returned invalid JSON', 'judge verdict count must match expectations', 'judge verdict requires grounded evidence'];
             result.error ??= safeErrors.includes(error?.message) ? error.message : 'Unexpected grading failure';
           }
         }

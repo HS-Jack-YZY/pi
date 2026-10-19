@@ -340,6 +340,7 @@ it('runs changed skills through Pi and preserves completed results on a later fa
       fakePi,
       `#!/usr/bin/env node
 if (process.env.FAKE_PI_FAIL === '1') { console.error('sensitive-provider-body'); process.exit(2); }
+if (process.env.FAKE_PI_CALL_LOG) require('node:fs').appendFileSync(process.env.FAKE_PI_CALL_LOG, process.argv.includes('--no-tools') ? 'judge\\n' : 'task\\n');
 const prompt = process.argv[process.argv.indexOf('-p') + 1];
 const reply = (text) => console.log(JSON.stringify({type:'message_end',message:{role:'assistant',
   stopReason:process.env.FAKE_PI_LENGTH === '1' ? 'length' : 'stop',
@@ -348,6 +349,8 @@ if (process.argv.includes('--no-tools')) {
   if (process.env.FAKE_JUDGE_FAIL === 'exit') { console.error('sensitive-provider-body'); process.exit(7); }
   if (process.env.FAKE_JUDGE_FAIL === 'json') { reply('sensitive-provider-body'); process.exit(0); }
   const data = JSON.parse(prompt);
+  if (process.env.FAKE_JUDGE_REPAIR === '1' && !data.grading_feedback) { reply(JSON.stringify({verdicts:data.requirements.map(() => ({passed:true,evidence:'sensitive-provider-body'}))})); process.exit(0); }
+  if (process.env.FAKE_JUDGE_NEGATIVE === '1') { reply(JSON.stringify({verdicts:data.requirements.map(() => ({passed:false,evidence:'required behavior is absent'}))})); process.exit(0); }
   if (process.env.FAKE_JUDGE_FAIL === 'evidence') { reply(JSON.stringify({verdicts:data.requirements.map(() => ({passed:true,evidence:'sensitive-provider-body'}))})); process.exit(0); }
   reply(JSON.stringify({verdicts: data.requirements.map(() => ({passed: true, evidence: data.answer}))}));
 } else {
@@ -451,6 +454,30 @@ if (process.argv.includes('--no-tools')) {
         .map((file) => readFileSync(path.join(diagnosticsDir, file), 'utf8')).join('\n');
       assert.ok(artifacts.includes(expected), artifacts);
       assert.doesNotMatch(artifacts, /sensitive-provider-body/);
+    }
+
+    for (const negative of [false, true]) {
+      const repairDir = path.join(root, negative ? 'valid-negative' : 'repaired-judge');
+      const callLog = path.join(root, negative ? 'negative-calls' : 'repair-calls');
+      const repairedRun = spawnSync(process.execPath, [script], {
+        cwd: root, encoding: 'utf8',
+        env: { ...gitEnv, PATH: `${bin}:${gitEnv.PATH}`,
+          FAKE_JUDGE_REPAIR: negative ? '0' : '1', FAKE_JUDGE_NEGATIVE: negative ? '1' : '0',
+          FAKE_PI_CALL_LOG: callLog, SKILL_EVAL_BASE_SHA: base, SKILL_EVAL_HEAD_SHA: head,
+          SKILL_EVAL_OUTPUT_DIR: repairDir, SKILL_EVAL_RUNS: '1' },
+      });
+      assert.equal(repairedRun.status, negative ? 1 : 0, repairedRun.stderr);
+      const calls = readFileSync(callLog, 'utf8').trim().split('\n');
+      assert.equal(calls.filter((call) => call === 'task').length, 7);
+      assert.equal(calls.filter((call) => call === 'judge').length, negative ? 7 : 14);
+      const grade = JSON.parse(readFileSync(path.join(repairDir, 'demo/eval-a/new_skill/run-1/grading.json'), 'utf8'));
+      assert.equal(grade.execution_metrics.judge_attempts.length, negative ? 1 : 2);
+      assert.equal(grade.summary.pass_rate, negative ? 0 : 1);
+      assert.doesNotMatch(JSON.stringify(grade), /sensitive-provider-body/);
+      if (!negative) {
+        assert.equal(grade.execution_metrics.judge_attempts[0].error, 'judge verdict requires grounded evidence');
+        assert.equal(grade.execution_metrics.judge_attempts[0].expectationIndex, 0);
+      }
     }
 
     writeFileSync(
