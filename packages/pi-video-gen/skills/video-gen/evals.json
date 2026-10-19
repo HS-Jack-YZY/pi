@@ -67,8 +67,8 @@
     },
     {
       "id": "multi-shot-film",
-      "prompt": "I want a short three-shot AI film with a recurring character and visual continuity between shots. Describe the planning, frame, confirmation, and render stages in Pi, including how many times the final render tool is invoked. Do not call tools.",
-      "expected_output": "Use a shot book, generate character/shot frames with image_generate, obtain confirmations, then call video_render once.",
+      "prompt": "I want a 30-second, three-shot AI product launch film with a recurring mascot and visual continuity. The product is a task manager; I have supplied actual UI screenshots and brand assets but no measured performance data. You may choose a sensible visual direction and proceed without waiting for a style selection. Explain the product evidence, rhythm and key-frame plan, frame generation, paid confirmation and render stages, including how many times the final render tool is invoked. I also want a music/effects treatment aligned to the reveals. Explain how you would achieve that using the existing Timeline or Remotion path and how you would review the export. Do not call task tools or create files; you may read skill references.",
+      "expected_output": "Read film-direction.md; ground claims in supplied product material without inventing performance numbers, recommend a direction without a mandatory selection, plan rhythm and readable key frames, use a shot book and image_generate only for missing frames, confirm paid scope, and call video_render once. Explain feasible audio timing in Remotion or disclose Timeline limitations; review actual stills, motion and audio with honest verification limits.",
       "expectations": [
         {
           "text": "Uses a shot book for the multi-shot plan",
@@ -92,6 +92,49 @@
             "call once",
             "once",
             "one call"
+          ]
+        },
+        {
+          "text": "Grounds claims and visuals in actual supplied product evidence without inventing performance results",
+          "includes_any": [
+            "evidence",
+            "supplied",
+            "actual"
+          ]
+        },
+        {
+          "text": "Plans rhythm, readable holds and representative key frames before building the full film",
+          "includes_any": [
+            "rhythm",
+            "beat map",
+            "beat-map"
+          ],
+          "includes": [
+            "hold"
+          ]
+        },
+        {
+          "text": "Recommends a visual direction and proceeds without requiring the user to choose among styles",
+          "includes_any": [
+            "recommend",
+            "default",
+            "proceed"
+          ]
+        },
+        {
+          "text": "Explains a supported way to time music/effects using Remotion or identifies that Timeline cannot place arbitrary timed effects or dynamically duck BGM",
+          "includes_any": [
+            "Remotion",
+            "fixed",
+            "duck"
+          ]
+        },
+        {
+          "text": "Reviews the exported film in stills, at normal speed and in audio, stating unavailable visual or listening checks honestly",
+          "includes_any": [
+            "normal speed",
+            "normal-speed",
+            "playback"
           ]
         }
       ]
