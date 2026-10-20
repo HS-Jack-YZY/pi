@@ -141,6 +141,7 @@ describe('telemetry final prompt', () => {
       expect(JSON.stringify(requests[0].messages)).toContain('APPENDED_BY_REAL_EXTENSION');
       expect(input).toEqual(requests[0].messages);
       expect(JSON.parse(stream.attributes['langfuse.observation.input'])).toEqual(requests[0]);
+      expect(JSON.parse(generation.attributes['langfuse.observation.metadata.rawInput'])).toEqual(requests[0]);
       expect(stream.parentSpanContext.spanId).toBe(generation.spanContext().spanId);
     } finally {
       session?.dispose();

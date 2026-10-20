@@ -263,7 +263,9 @@ describe('telemetry', () => {
         expect(JSON.parse(String(attributes['langfuse.observation.input']))).toEqual([
           { role: 'user', content: 'secret-question' },
         ]);
-        expect(attributes['langfuse.observation.metadata.rawInput']).toBeUndefined();
+        expect(JSON.parse(String(attributes['langfuse.observation.metadata.rawInput']))).toEqual(
+          event.input,
+        );
         expect(JSON.parse(String(stream.attributes['langfuse.observation.input']))).toEqual({
           messages: ['secret-request'],
         });

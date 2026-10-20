@@ -197,8 +197,10 @@ describe('interrupt flow', () => {
         generations[index]!.spanContext().spanId,
       );
       expect(
-        generations[index]!.attributes['langfuse.observation.metadata.rawInput'],
-      ).toBeUndefined();
+        JSON.parse(
+          String(generations[index]!.attributes['langfuse.observation.metadata.rawInput']),
+        ),
+      ).toEqual(payload);
     }
     expect(JSON.parse(String(streams[0]!.attributes['langfuse.observation.output']))).toEqual([]);
     expect(JSON.parse(String(streams[1]!.attributes['langfuse.observation.output']))).toEqual([
