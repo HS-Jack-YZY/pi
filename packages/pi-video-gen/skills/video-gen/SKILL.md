@@ -5,7 +5,7 @@ description: "Create video from existing clips, direct video-model calls, batch 
 
 # Video generation
 
-Choose each shot's source independently: existing video, a model-generated clip, or graphics in a Remotion project. Then choose the assembly path:
+Choose each shot's source independently: existing video, a model-generated clip, or graphics in a Remotion project. In a proposed workflow, name the actual tool at each handoff, including `image_generate` for missing portraits or reference frames; a package or skill name alone does not specify the executable tool. Then choose the assembly path:
 
 - **C0 local concat** — `video_compose` joins compatible existing MP4 clips.
 - **Timeline render** — `video_compose` locally turns images/screenshots and existing video clips into a video with overlays, motion, transitions, soft or burned subtitles, source audio, and optional BGM. Narration is an optional network feature.
@@ -27,7 +27,9 @@ The AI video model is fixed by `pi-video-gen.defaultModel`; generated images use
    | Promo/explainer from images, screenshots & clips | `video_compose` (TimelineSpec — local mixed-media render; optional network TTS) |
    | Precise UI, charts, typography or editable frame animation | `video_compose` with a trusted Remotion project, or `video_render` with Remotion assembly when the script also generates shots |
 
-1. **Local flows stop here.** For C0 follow §A0; for Timeline follow §A1; for Remotion read its handoff. All-local scripts need no video-model credentials or paid-model confirmation. Use `image_generate` only when source images are missing.
+   **Creative planning.** For a product launch film, product demo, or authored explainer, read [film direction](references/film-direction.md) before designing scenes, including when all media is local. Follow its direction, rhythm, sound and review workflow alongside the selected assembly path. A single requested clip or a straightforward assembly follows its supplied instructions without this planning stage.
+
+1. **Local flows use their assembly guide.** For C0 follow §A0; for Timeline follow §A1; for Remotion read its handoff. All-local scripts need no video-model credentials or paid-model confirmation. Use `image_generate` only when source images are missing.
 2. **AI preflight only for generated shots.** Call `video_capabilities` and respect the active model's duration, audio, frame and trusted-asset support. Confirm `image_generate` is available only when source frames need to be generated (`/video-gen doctor` checks; config health is `/image-gen list`).
 3. **Pick direct or scripted generation.** Use `video_generate` directly for each model clip when the agent is controlling the calls. Use `video_render` for a prepared script that automates per-shot generation, persistence, recovery and assembly. A project may mix generated shots with existing footage without generating it again.
 4. **Plan only what the film needs.** For a story with recurring characters or shot-to-shot continuity, write a shot book in conversation using §B. For other clips, work from the supplied media or shot instructions. Existing frames can be reused; generate missing portraits or first/last frames with `image_generate` using §C when they improve consistency.
@@ -223,3 +225,5 @@ Then call `video_render` with that path. Interrupted? Call it again with the sam
 ## E. Completion
 
 Before reporting success, verify the requested clip/segment count and order, inspect the final video or available QC evidence, and report the returned absolute path and any accepted degradation. For Timeline, perform the QC-frame and subtitle checks in §A1. A successful tool call alone does not establish visual acceptance; state any verification limitation.
+
+For films using [film direction](references/film-direction.md), complete its delivery review and revision checks against the actual exported version. Report separately what was checked in stills, in motion and in audio.
