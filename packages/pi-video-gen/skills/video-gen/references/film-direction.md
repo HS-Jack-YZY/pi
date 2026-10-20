@@ -33,9 +33,9 @@ Choose the typography and palette from the actual brand, product or source mater
 
 ## 3. Prove the hardest moment, then assemble
 
-Build the shot or transition most likely to fail first: a dense UI view, cross-device handoff, difficult chart, or hero reveal. Render and inspect it at delivery resolution before extending the same treatment to the full film. Correct unreadable text, collisions, unclear focus and broken continuity at this stage.
+Build the shot or transition most likely to fail first: a dense UI view, cross-device handoff, difficult chart, or hero reveal. Inspect it at delivery resolution using the Remotion project's native preview/still renderer, or source-frame and overlay stills for Timeline, before extending the same treatment to the full film. Correct unreadable text, collisions, unclear focus and broken continuity at this stage. Reserve `video_compose` or `video_render` for one complete initial film export after all scenes are ready; a full-length placeholder film is not a required proof stage. If a separate prototype video is genuinely necessary, explain that extra render explicitly rather than silently adding it to the default workflow.
 
-For a multi-scene film, inspect representative key frames for the opening, hero moment, densest information and ending. These may be frames from the same prototype rather than separate generated images. Then build the remaining scenes using the chosen Timeline or Remotion path and any generated shots the film actually needs.
+For a multi-scene film, inspect representative key frames for the opening, hero moment, densest information and ending. These may be frames from the same prototype rather than separate generated images. For missing mascot portraits or shot frames, use `image_generate` through the pi-image-gen skill and record the returned asset paths. Keep supplied screenshots as original assets. Then build the remaining scenes using the chosen Timeline or Remotion path and any generated shots the film actually needs.
 
 ## 4. Plan sound on the same clock as picture
 

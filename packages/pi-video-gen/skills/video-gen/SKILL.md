@@ -5,7 +5,7 @@ description: "Create video from existing clips, direct video-model calls, batch 
 
 # Video generation
 
-Choose each shot's source independently: existing video, a model-generated clip, or graphics in a Remotion project. Then choose the assembly path:
+Choose each shot's source independently: existing video, a model-generated clip, or graphics in a Remotion project. In a proposed workflow, name the actual tool at each handoff, including `image_generate` for missing portraits or reference frames; a package or skill name alone does not specify the executable tool. Then choose the assembly path:
 
 - **C0 local concat** — `video_compose` joins compatible existing MP4 clips.
 - **Timeline render** — `video_compose` locally turns images/screenshots and existing video clips into a video with overlays, motion, transitions, soft or burned subtitles, source audio, and optional BGM. Narration is an optional network feature.
