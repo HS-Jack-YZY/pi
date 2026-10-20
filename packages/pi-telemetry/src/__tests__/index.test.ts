@@ -231,12 +231,26 @@ describe('telemetry', () => {
       await exporter.publish({ ...event, status: 'started' });
       await exporter.publish({
         ...event,
+        id: 'stream',
+        streamEvents: [{ type: 'text_delta', delta: 'secret-frame' }],
+      });
+      await exporter.publish({
+        ...event,
         status: 'completed',
         createdAt: '2026-10-08T00:00:01Z',
         completionStartTime: '2026-10-08T00:00:00.250Z',
         displayOutput: { role: 'assistant', content: 'secret-answer' },
       });
-      const attributes = inMemory.getFinishedSpans()[0]!.attributes;
+      const stream = inMemory.getFinishedSpans().find((span) => span.name === 'llm-stream')!;
+      const attributes = inMemory
+        .getFinishedSpans()
+        .find((span) => span.attributes['langfuse.observation.type'] === 'generation')!.attributes;
+      expect(stream.parentSpanContext?.spanId).toBe(
+        inMemory
+          .getFinishedSpans()
+          .find((span) => span.attributes['langfuse.observation.type'] === 'generation')!
+          .spanContext().spanId,
+      );
       expect(attributes['langfuse.observation.completion_start_time']).toBe(
         '2026-10-08T00:00:00.250Z',
       );
@@ -249,12 +263,49 @@ describe('telemetry', () => {
         expect(JSON.parse(String(attributes['langfuse.observation.input']))).toEqual([
           { role: 'user', content: 'secret-question' },
         ]);
-        expect(JSON.parse(String(attributes['langfuse.observation.metadata.rawInput']))).toEqual({
+        expect(attributes['langfuse.observation.metadata.rawInput']).toBeUndefined();
+        expect(JSON.parse(String(stream.attributes['langfuse.observation.input']))).toEqual({
           messages: ['secret-request'],
         });
-      } else expect(JSON.stringify(attributes)).not.toContain('secret-');
+      } else
+        expect(
+          JSON.stringify(inMemory.getFinishedSpans().map((span) => span.attributes)),
+        ).not.toContain('secret-');
       await exporter.close();
     }
+  });
+
+  it('applies redaction and credential masking to raw stream inputs', async () => {
+    const { exporter, inMemory } = makeExporter({
+      headers: { Authorization: 'Bearer private-token' },
+      redactEvent: (event) =>
+        'streamEvents' in event
+          ? {
+              ...event,
+              input: {
+                text: 'approved private-token',
+                image: { type: 'image', mimeType: 'image/png', data: 'aGVsbG8=' },
+              },
+            }
+          : event,
+    });
+    await exporter.publish({
+      id: 'stream',
+      traceId,
+      sessionId: 's',
+      conversationId: 's',
+      llmGenerationId: 'g',
+      createdAt: new Date().toISOString(),
+      input: { text: 'private-question' },
+      streamEvents: [],
+    });
+    const serialized = JSON.stringify(inMemory.getFinishedSpans()[0]!.attributes);
+    expect(serialized).toContain('approved');
+    expect(serialized).toContain('[redacted]');
+    expect(serialized).not.toContain('private-question');
+    expect(serialized).not.toContain('private-token');
+    expect(serialized).not.toContain('aGVsbG8=');
+    await exporter.close();
   });
 
   it('explains missing keys while retaining masking for disabled destinations', async () => {

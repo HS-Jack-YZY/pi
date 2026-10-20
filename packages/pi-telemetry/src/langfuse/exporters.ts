@@ -443,9 +443,6 @@ export class OtelRuntimeEventExporter implements RuntimeEventExporter {
         this.enrichSpanAttributes(
           {
             ...terminalAttributes,
-            ...(event.input !== undefined && event.displayInput !== undefined
-              ? { 'langfuse.observation.metadata.rawInput': event.input }
-              : {}),
             ...langfuseObservationAttributes({
               type: 'generation',
               input: event.displayInput ?? event.input,
@@ -481,6 +478,7 @@ export class OtelRuntimeEventExporter implements RuntimeEventExporter {
           ...lineageMetadata(event),
           llmGenerationId: event.llmGenerationId,
           ...langfuseObservationAttributes({
+            input: event.input,
             output: event.streamEvents,
             level: 'DEFAULT',
           }),

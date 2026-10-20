@@ -15,6 +15,7 @@ import {
   displayMessage,
   hasFirstToken,
   modelParameters,
+  providerDisplayInput,
   toTelemetryValue,
 } from './observations.js';
 import { createTelemetryExporter } from './otel.js';
@@ -274,6 +275,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
   let hasFullContext = false;
   let mediaEnabled = false;
   let lastModelConfig: RuntimeModelConfig = { provider: 'unknown', model: 'unknown' };
+  let streamInput: JsonValue | undefined;
   let streamStartedAt: number | undefined;
   let completionStartTime: string | undefined;
   let requestParameters: JsonObject = {};
@@ -767,9 +769,30 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
     return messages;
   }
 
+  async function publishStream(): Promise<void> {
+    if (currentTraceId && streamStartedAt !== undefined) {
+      const endedAt = Date.now();
+      await exporter.publish({
+        id: randomUUID(),
+        ...observationLineage(currentTraceId),
+        llmGenerationId: `gen-${llmGenerationCounter}`,
+        createdAt: new Date(streamStartedAt).toISOString(),
+        durationMs: endedAt - streamStartedAt,
+        ...(streamInput !== undefined ? { input: streamInput } : {}),
+        streamEvents,
+      });
+      streamInput = undefined;
+      streamStartedAt = undefined;
+      streamEvents = [];
+      streamBytes = 0;
+      streamTruncated = false;
+    }
+  }
+
   async function failOpenGeneration(error: string, stopReason: string): Promise<void> {
     if (!currentTraceId || !generationOpen) return;
     generationOpen = false;
+    await publishStream();
     await exporter.publish({
       id: randomUUID(),
       ...observationLineage(currentTraceId),
@@ -794,11 +817,15 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
     requestParameters = modelParameters(event.payload, ctx.thinkingLevel);
     systemPrompt = ctx.getSystemPrompt?.() ?? systemPrompt;
     completionStartTime = undefined;
-    streamStartedAt = undefined;
+    streamStartedAt = Date.now();
+    streamInput = event.payload as JsonValue;
     streamEvents = [];
     streamBytes = 0;
     streamTruncated = false;
 
+    const displayInput =
+      providerDisplayInput(event.payload) ??
+      (contextHistory || systemPrompt ? generationDisplayInput() : undefined);
     await exporter.publish({
       id: randomUUID(),
       ...observationLineage(currentTraceId),
@@ -809,7 +836,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
       model: lastModelConfig,
       input: event.payload as JsonValue,
       modelParameters: requestParameters,
-      ...(contextHistory || systemPrompt ? { displayInput: generationDisplayInput() } : {}),
+      ...(displayInput !== undefined ? { displayInput } : {}),
     });
   });
 
@@ -849,21 +876,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
     const failure = messageFailure(msg);
     const displayOutput = displayMessage(msg);
 
-    if (streamStartedAt !== undefined && streamEvents.length > 0) {
-      const endedAt = Date.now();
-      await exporter.publish({
-        id: randomUUID(),
-        ...observationLineage(currentTraceId),
-        llmGenerationId: `gen-${llmGenerationCounter}`,
-        createdAt: new Date(streamStartedAt).toISOString(),
-        durationMs: endedAt - streamStartedAt,
-        streamEvents,
-      });
-      streamStartedAt = undefined;
-      streamEvents = [];
-      streamBytes = 0;
-      streamTruncated = false;
-    }
+    await publishStream();
 
     const output: JsonObject = {};
     if (content !== undefined) output.content = content;

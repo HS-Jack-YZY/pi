@@ -115,11 +115,7 @@ describe('interrupt flow', () => {
         { role: 'user', content: 'question' },
       ],
     });
-    await fireEvent(
-      'before_provider_request',
-      { payload: { messages: [] } },
-      { getSystemPrompt: () => '' },
-    );
+    await fireEvent('before_provider_request', { payload: {} }, { getSystemPrompt: () => '' });
     await fireEvent('message_end', { message: assistantMessage('answer') });
     const generation = exported.find(
       (span) => span.attributes['langfuse.observation.type'] === 'generation',
@@ -137,7 +133,7 @@ describe('interrupt flow', () => {
     );
   });
 
-  it('displays tool removals in the system transcript without changing the provider request', async () => {
+  it('uses the final provider transcript instead of cached tool removal annotations', async () => {
     await fireEvent('session_start', {});
     recordExports();
     await fireEvent('input', { text: 'continue' });
@@ -156,12 +152,61 @@ describe('interrupt flow', () => {
       (span) => span.attributes['langfuse.observation.type'] === 'generation',
     )!;
     const input = JSON.parse(String(generation.attributes['langfuse.observation.input']));
-    expect(input[2]).toEqual({ role: 'system', content: '[Tools removed: bash, read]' });
-    expect(input[3]).toEqual({ role: 'system', content: 'unchanged' });
+    expect(input).toEqual(payload.messages);
     expect(payload).toEqual({ messages: [{ role: 'system', content: 'actual provider prompt' }] });
     expect(
-      JSON.parse(String(generation.attributes['langfuse.observation.metadata.rawInput'])),
+      JSON.parse(
+        String(
+          exported.find((span) => span.name === 'llm-stream')!.attributes[
+            'langfuse.observation.input'
+          ],
+        ),
+      ),
     ).toEqual(payload);
+  });
+
+  it('pairs each retry request with its own stream under the matching generation', async () => {
+    await fireEvent('session_start', {});
+    recordExports();
+    await fireEvent('turn_start', { timestamp: Date.now() });
+    const first = { messages: [{ role: 'system', content: 'attempt one' }] };
+    const second = { messages: [{ role: 'system', content: 'attempt two' }] };
+    const third = { messages: [{ role: 'system', content: 'attempt three' }] };
+    await fireEvent('before_provider_request', { payload: first });
+    await fireEvent('after_provider_response', { status: 429 });
+    await fireEvent('before_provider_request', { payload: second });
+    await fireEvent('message_update', {
+      assistantMessageEvent: { type: 'text_delta', delta: 'partial' },
+    });
+    await fireEvent('before_provider_request', { payload: third });
+    await fireEvent('message_update', {
+      assistantMessageEvent: { type: 'text_delta', delta: 'answer' },
+    });
+    await fireEvent('message_end', { message: assistantMessage('answer') });
+    const streams = exported.filter((span) => span.name === 'llm-stream');
+    const generations = exported.filter(
+      (span) => span.attributes['langfuse.observation.type'] === 'generation',
+    );
+    expect(streams).toHaveLength(3);
+    expect(generations).toHaveLength(3);
+    for (const [index, payload] of [first, second, third].entries()) {
+      expect(JSON.parse(String(streams[index]!.attributes['langfuse.observation.input']))).toEqual(
+        payload,
+      );
+      expect(streams[index]!.parentSpanContext?.spanId).toBe(
+        generations[index]!.spanContext().spanId,
+      );
+      expect(
+        generations[index]!.attributes['langfuse.observation.metadata.rawInput'],
+      ).toBeUndefined();
+    }
+    expect(JSON.parse(String(streams[0]!.attributes['langfuse.observation.output']))).toEqual([]);
+    expect(JSON.parse(String(streams[1]!.attributes['langfuse.observation.output']))).toEqual([
+      { type: 'text_delta', delta: 'partial' },
+    ]);
+    expect(JSON.parse(String(streams[2]!.attributes['langfuse.observation.output']))).toEqual([
+      { type: 'text_delta', delta: 'answer' },
+    ]);
   });
 
   it('exports thinking and redacted thinking in the backend ChatML shape', async () => {

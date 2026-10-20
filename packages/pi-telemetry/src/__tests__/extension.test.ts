@@ -231,7 +231,7 @@ describe('telemetryExtension', () => {
       ctx,
     );
     await fireEvent('session_tree', { summaryEntry: { summary: 'branch', usage } }, ctx);
-    const generations = getPublishedEvents().filter((e) => 'llmGenerationId' in e);
+    const generations = getPublishedEvents().filter((e) => 'llmGenerationId' in e && 'status' in e);
     expect(generations).toHaveLength(4);
     expect(generations).toEqual(
       expect.arrayContaining([
@@ -247,6 +247,142 @@ describe('telemetryExtension', () => {
     expect(generations[2]!.traceId).not.toBe(generations[0]!.traceId);
   });
 
+  it.each([
+    {
+      payload: {
+        system: [{ type: 'text', text: 'Anthropic final' }],
+        messages: [{ role: 'user', content: 'question' }],
+        tools: [{ name: 'read', input_schema: {} }],
+      },
+      expected: [
+        {
+          role: 'system',
+          content: [{ type: 'text', text: 'Anthropic final' }],
+          tools: [{ name: 'read', input_schema: {} }],
+        },
+        { role: 'user', content: 'question' },
+      ],
+    },
+    {
+      payload: {
+        instructions: 'Responses final',
+        input: [
+          { role: 'developer', content: 'policy' },
+          { type: 'function_call_output', call_id: 'c', output: 'result' },
+        ],
+        tools: [{ type: 'function', name: 'read', parameters: {} }],
+      },
+      expected: [
+        {
+          role: 'system',
+          content: 'Responses final',
+          tools: [{ type: 'function', name: 'read', parameters: {} }],
+        },
+        { role: 'developer', content: 'policy' },
+        { type: 'function_call_output', call_id: 'c', output: 'result' },
+      ],
+    },
+    {
+      payload: { input: 'question', instructions: 'Responses final' },
+      expected: [
+        { role: 'system', content: 'Responses final' },
+        { role: 'user', content: 'question' },
+      ],
+    },
+    {
+      payload: {
+        contents: [
+          { role: 'user', parts: [{ text: 'question' }] },
+          { role: 'model', parts: [{ functionCall: { name: 'read', args: {} } }] },
+        ],
+        config: {
+          systemInstruction: 'Gemini final',
+          tools: [{ functionDeclarations: [{ name: 'read' }] }],
+        },
+      },
+      expected: [
+        {
+          role: 'system',
+          content: 'Gemini final',
+          tools: [{ functionDeclarations: [{ name: 'read' }] }],
+        },
+        { role: 'user', content: [{ text: 'question' }] },
+        { role: 'assistant', content: [{ functionCall: { name: 'read', args: {} } }] },
+      ],
+    },
+  ])('reflects final protocol instructions and tool declarations: $payload', async ({
+    payload,
+    expected,
+  }) => {
+    telemetryExtension(mockPi as any);
+    await fireEvent('session_start', {});
+    await fireEvent('turn_start', { timestamp: Date.now() });
+    await fireEvent('context_with_system', {
+      messages: [{ role: 'system', content: 'stale prompt' }],
+    });
+    await fireEvent('before_provider_request', { payload });
+    expect(getPublishedEvents().find((e) => 'status' in e && e.status === 'started')).toMatchObject(
+      { displayInput: expected },
+    );
+  });
+
+  it('retains the refreshed system and active tools fallback for unknown protocols', async () => {
+    telemetryExtension({
+      ...mockPi,
+      getActiveTools: () => ['read'],
+      getAllTools: () => [{ name: 'read', description: 'Read', parameters: {} }],
+    } as any);
+    await fireEvent('session_start', {});
+    await fireEvent('turn_start', { timestamp: Date.now() });
+    await fireEvent('context', { messages: [{ role: 'user', content: 'question' }] });
+    await fireEvent(
+      'before_provider_request',
+      { payload: {} },
+      { getSystemPrompt: () => 'refreshed prompt' },
+    );
+    expect(getPublishedEvents().find((e) => 'status' in e && e.status === 'started')).toMatchObject(
+      {
+        displayInput: [
+          {
+            role: 'system',
+            content: 'refreshed prompt',
+            tools: [{ name: 'read', description: 'Read', parameters: {} }],
+          },
+          { role: 'user', content: 'question' },
+        ],
+      },
+    );
+  });
+
+  it('uses final provider messages instead of an earlier full context', async () => {
+    telemetryExtension(mockPi as any);
+    await fireEvent('session_start', {});
+    await fireEvent('turn_start', { timestamp: Date.now() });
+    await fireEvent('context_with_system', {
+      messages: [
+        { role: 'system', content: 'earlier instructions' },
+        { role: 'user', content: 'hello' },
+      ],
+    });
+    const payload = {
+      messages: [
+        { role: 'developer', content: 'final instructions appended by extension' },
+        { role: 'user', content: 'hello, projected' },
+      ],
+      tools: [{ type: 'function', function: { name: 'read', parameters: { type: 'object' } } }],
+    };
+    await fireEvent(
+      'before_provider_request',
+      { payload },
+      { getSystemPrompt: () => 'still earlier' },
+    );
+    expect(getPublishedEvents().find((e) => 'status' in e && e.status === 'started')).toMatchObject(
+      {
+        displayInput: [{ ...payload.messages[0], tools: payload.tools }, payload.messages[1]],
+      },
+    );
+  });
+
   it('keeps raw requests intact while exposing readable history, thinking and tool calls', async () => {
     telemetryExtension(mockPi as any);
     await fireEvent('session_start', {});
@@ -254,7 +390,13 @@ describe('telemetryExtension', () => {
     await fireEvent('turn_start', { timestamp: Date.now() });
     await fireEvent('agent_start', {}, { getSystemPrompt: () => 'final instructions' });
     await fireEvent('context', { messages: [{ role: 'user', content: 'hello' }] });
-    const payload = { messages: [{ role: 'user', content: 'hello' }], max_tokens: 10 };
+    const payload = {
+      messages: [
+        { role: 'system', content: 'final instructions' },
+        { role: 'user', content: 'hello' },
+      ],
+      max_tokens: 10,
+    };
     await fireEvent('before_provider_request', { payload });
     await fireEvent('message_end', {
       message: {
@@ -266,9 +408,11 @@ describe('telemetryExtension', () => {
         ],
       },
     });
-    const generations = getPublishedEvents().filter((e) => 'llmGenerationId' in e) as any[];
+    const generations = getPublishedEvents().filter(
+      (e) => 'llmGenerationId' in e && 'status' in e,
+    ) as any[];
     expect(generations[0].input).toEqual(payload);
-    expect(payload).toEqual({ messages: [{ role: 'user', content: 'hello' }], max_tokens: 10 });
+    expect(payload.messages[0]).toEqual({ role: 'system', content: 'final instructions' });
     expect(generations[0].displayInput).toEqual([
       { role: 'system', content: 'final instructions' },
       { role: 'user', content: 'hello' },
@@ -794,12 +938,12 @@ describe('telemetryExtension', () => {
     });
 
     const events = getPublishedEvents();
-    const llmEvents = events.filter((e) => 'llmGenerationId' in e);
+    const llmEvents = events.filter((e) => 'llmGenerationId' in e && 'status' in e);
     expect(llmEvents).toHaveLength(1);
     expect(llmEvents[0]).toMatchObject({ status: 'started' });
   });
 
-  it('publishes stream frames only when message_update events were received', async () => {
+  it('pairs requests with stream frames, including responses without message updates', async () => {
     telemetryExtension(mockPi as any);
     await fireEvent('session_start', { type: 'session_start', reason: 'startup' });
     await fireEvent('turn_start', { type: 'turn_start', turnIndex: 0, timestamp: Date.now() });
@@ -831,7 +975,11 @@ describe('telemetryExtension', () => {
       type: 'message_end',
       message: { role: 'assistant', content: [{ type: 'text', text: 'done' }], usage: {} },
     });
-    expect(getPublishedEvents().filter((event) => 'streamEvents' in event)).toHaveLength(1);
+    expect(getPublishedEvents().filter((event) => 'streamEvents' in event)).toHaveLength(2);
+    expect(getPublishedEvents().filter((event) => 'streamEvents' in event)[1]).toMatchObject({
+      input: {},
+      streamEvents: [],
+    });
   });
 
   it('publishes LLM generation failed for 4xx/5xx responses', async () => {
@@ -850,7 +998,7 @@ describe('telemetryExtension', () => {
     });
 
     const events = getPublishedEvents();
-    const llmEvents = events.filter((e) => 'llmGenerationId' in e);
+    const llmEvents = events.filter((e) => 'llmGenerationId' in e && 'status' in e);
     expect(llmEvents[1]).toMatchObject({
       status: 'failed',
       error: 'HTTP 429',
@@ -915,7 +1063,7 @@ describe('telemetryExtension', () => {
     });
 
     const events = getPublishedEvents();
-    const llmEvents = events.filter((e) => 'llmGenerationId' in e);
+    const llmEvents = events.filter((e) => 'llmGenerationId' in e && 'status' in e);
     expect(llmEvents[0]).toMatchObject({ llmGenerationId: 'gen-1' });
     expect(llmEvents[2]).toMatchObject({ llmGenerationId: 'gen-2' });
   });
@@ -964,7 +1112,7 @@ describe('telemetryExtension', () => {
     });
 
     const events = getPublishedEvents();
-    const llmEvents = events.filter((e) => 'llmGenerationId' in e);
+    const llmEvents = events.filter((e) => 'llmGenerationId' in e && 'status' in e);
     expect(llmEvents[0]).toMatchObject({ llmGenerationId: 'gen-1' });
     expect(llmEvents[1]).toMatchObject({ llmGenerationId: 'gen-1' });
   });
@@ -1071,7 +1219,7 @@ describe('telemetryExtension', () => {
     });
 
     const events = getPublishedEvents();
-    const llmEvents = events.filter((e) => 'llmGenerationId' in e) as any[];
+    const llmEvents = events.filter((e) => 'llmGenerationId' in e && 'status' in e) as any[];
     expect(llmEvents).toHaveLength(2);
     const completed = llmEvents[1];
     expect(completed).toMatchObject({
@@ -1117,7 +1265,7 @@ describe('telemetryExtension', () => {
     });
 
     const events = getPublishedEvents();
-    const llmEvents = events.filter((e) => 'llmGenerationId' in e) as any[];
+    const llmEvents = events.filter((e) => 'llmGenerationId' in e && 'status' in e) as any[];
     const completed = llmEvents[1];
     expect(completed.output).toEqual({ content: content, usage: { input: 50, output: 30 } });
   });
@@ -1137,7 +1285,7 @@ describe('telemetryExtension', () => {
     });
 
     const events = getPublishedEvents();
-    const llmEvents = events.filter((e) => 'llmGenerationId' in e);
+    const llmEvents = events.filter((e) => 'llmGenerationId' in e && 'status' in e);
     expect(llmEvents).toHaveLength(1);
     expect(llmEvents[0]).toMatchObject({ status: 'started' });
   });
