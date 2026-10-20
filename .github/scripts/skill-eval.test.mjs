@@ -11,6 +11,7 @@ import {
   gradeExpectations,
   gradeTrace,
   parsePiEvents,
+  runPi,
   selectRegressionEvalSet,
   selectSkillChanges,
   validateEvalSet,
@@ -168,13 +169,69 @@ it('scores actual tool order and arguments rather than prose claims', () => {
   assert.notEqual(gradeTrace([], expectations).score, 1);
   const events = [
     { type: 'tool_execution_start', toolCallId: '1', toolName: 'image_generate', args: { aspectRatio: '16:9' } },
-    { type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } },
+    { type: 'message_end', message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'done' }] } },
   ];
   assert.equal(parsePiEvents(events.map(JSON.stringify).join('\n')).calls[0].isError, true);
   events.push({ type: 'tool_execution_end', toolCallId: '1', isError: false });
   assert.equal(parsePiEvents(events.map(JSON.stringify).join('\n')).calls[0].isError, false);
   events.push({ type: 'message_end', message: { role: 'assistant', stopReason: 'error', content: [] } });
   assert.throws(() => parsePiEvents(events.map(JSON.stringify).join('\n')), /did not complete/);
+});
+
+it('rejects token-limited answers while retaining bounded completion diagnostics', () => {
+  const event = { type: 'message_end', message: {
+    role: 'assistant', stopReason: 'length', rawStopReason: 'length',
+    content: [{ type: 'text', text: 'x'.repeat(2048) }],
+    usage: { input: 100, output: 512, totalTokens: 612, cost: { secret: 'sensitive-provider-body' } },
+  } };
+  assert.throws(() => parsePiEvents(JSON.stringify(event)), (error) => {
+    assert.equal(error.message, 'Assistant reached its output token limit');
+    assert.deepEqual(error.diagnostics, {
+      answerChars: 2048,
+      messages: [{ stopReason: 'length', usage: { input: 100, output: 512, totalTokens: 612 } }],
+    });
+    return true;
+  });
+});
+
+it('classifies incomplete subprocess results before grading, including judge responses', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'pi-skill-eval-completion-'));
+  const oldPath = process.env.PATH;
+  try {
+    const fakePi = path.join(root, 'pi');
+    writeFileSync(fakePi, `#!/usr/bin/env node
+const prompt = process.argv[process.argv.indexOf('-p') + 1];
+const mode = process.argv[process.argv.indexOf('--mode') + 1];
+console.error('sensitive-provider-body');
+if (mode !== 'json') { console.log('partial'); process.exit(0); }
+if (prompt === 'invalid') { console.log('{'); process.exit(0); }
+console.log(JSON.stringify({type:'message_end',message:{role:'assistant',
+  stopReason:prompt === 'oversize' ? 'stop' : prompt,
+  content:[{type:'text',text:'x'.repeat(prompt === 'oversize' ? 20001 : 2048)}],
+  usage:{input:100,output:512,totalTokens:612},errorMessage:'sensitive-provider-body'}}));
+`);
+    chmodSync(fakePi, 0o755);
+    process.env.PATH = `${root}:${oldPath}`;
+    for (const judge of [false, true]) {
+      const result = await runPi({ cwd: root, prompt: 'length', timeoutMs: 5000, judge });
+      assert.equal(result.failure_mode, 'crash');
+      assert.equal(result.error, 'Assistant reached its output token limit');
+      assert.equal(result.diagnostics.messages[0].stopReason, 'length');
+      assert.equal(result.diagnostics.messages[0].usage.output, 512);
+      assert.doesNotMatch(JSON.stringify(result), /sensitive-provider-body/);
+    }
+    for (const prompt of ['toolUse', 'oversize', 'invalid']) {
+      const result = await runPi({ cwd: root, prompt, timeoutMs: 5000 });
+      assert.equal(result.failure_mode, 'crash', prompt);
+      assert.doesNotMatch(JSON.stringify(result), /sensitive-provider-body/);
+    }
+    const completed = await runPi({ cwd: root, prompt: 'stop', timeoutMs: 5000 });
+    assert.equal(completed.failure_mode, 'ok');
+    assert.equal(completed.answer.length, 2048);
+  } finally {
+    process.env.PATH = oldPath;
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 it('requires new skills to clear both the absolute score and improvement delta', () => {
@@ -283,19 +340,24 @@ it('runs changed skills through Pi and preserves completed results on a later fa
       fakePi,
       `#!/usr/bin/env node
 if (process.env.FAKE_PI_FAIL === '1') { console.error('sensitive-provider-body'); process.exit(2); }
+if (process.env.FAKE_PI_CALL_LOG) require('node:fs').appendFileSync(process.env.FAKE_PI_CALL_LOG, process.argv.includes('--no-tools') ? 'judge\\n' : 'task\\n');
 const prompt = process.argv[process.argv.indexOf('-p') + 1];
-const mode = process.argv[process.argv.indexOf('--mode') + 1];
-if (mode === 'text') {
+const reply = (text) => console.log(JSON.stringify({type:'message_end',message:{role:'assistant',
+  stopReason:process.env.FAKE_PI_LENGTH === '1' ? 'length' : 'stop',
+  usage:{input:100,output:512,totalTokens:612},content:[{type:'text',text}]}}));
+if (process.argv.includes('--no-tools')) {
   if (process.env.FAKE_JUDGE_FAIL === 'exit') { console.error('sensitive-provider-body'); process.exit(7); }
-  if (process.env.FAKE_JUDGE_FAIL === 'json') { console.log('sensitive-provider-body'); process.exit(0); }
+  if (process.env.FAKE_JUDGE_FAIL === 'json') { reply('sensitive-provider-body'); process.exit(0); }
   const data = JSON.parse(prompt);
-  if (process.env.FAKE_JUDGE_FAIL === 'evidence') { console.log(JSON.stringify({verdicts:data.requirements.map(() => ({passed:true,evidence:'sensitive-provider-body'}))})); process.exit(0); }
-  console.log(JSON.stringify({verdicts: data.requirements.map(() => ({passed: true, evidence: data.answer}))}));
+  if (process.env.FAKE_JUDGE_REPAIR === '1' && !data.grading_feedback) { reply(JSON.stringify({verdicts:data.requirements.map(() => ({passed:true,evidence:'sensitive-provider-body'}))})); process.exit(0); }
+  if (process.env.FAKE_JUDGE_NEGATIVE === '1') { reply(JSON.stringify({verdicts:data.requirements.map(() => ({passed:false,evidence:'required behavior is absent'}))})); process.exit(0); }
+  if (process.env.FAKE_JUDGE_FAIL === 'evidence') { reply(JSON.stringify({verdicts:data.requirements.map(() => ({passed:true,evidence:'sensitive-provider-body'}))})); process.exit(0); }
+  reply(JSON.stringify({verdicts: data.requirements.map(() => ({passed: true, evidence: data.answer}))}));
 } else {
   if (!process.argv.includes('--no-builtin-tools') || process.argv.includes('--no-tools')) process.exit(4);
   for (let i = 0; i < 180; i++) console.log(JSON.stringify({type:'message_update',padding:'x'.repeat(2000)}));
   const ids = ['a','b','c'].filter((id) => prompt.includes('prompt ' + id));
-  console.log(JSON.stringify({type:'message_end', message:{role:'assistant',content:[{type:'text',text:ids.map((id) => 'needle-' + id).join(' ')}]}}));
+  reply(ids.map((id) => 'needle-' + id).join(' '));
 }
 `,
     );
@@ -358,6 +420,23 @@ if (mode === 'text') {
     ].map((relative) => readFileSync(path.join(sanitizedOutputDir, relative), 'utf8')).join('\n');
     assert.doesNotMatch(failureArtifacts, /sensitive-provider-body/);
 
+    const limitedDir = path.join(root, 'token-limited-results');
+    const limitedRun = spawnSync(process.execPath, [script], {
+      cwd: root, encoding: 'utf8',
+      env: { ...gitEnv, PATH: `${bin}:${gitEnv.PATH}`, FAKE_PI_LENGTH: '1', FAKE_JUDGE_FAIL: 'exit',
+        SKILL_EVAL_BASE_SHA: base, SKILL_EVAL_HEAD_SHA: head,
+        SKILL_EVAL_OUTPUT_DIR: limitedDir, SKILL_EVAL_RUNS: '1' },
+    });
+    assert.equal(limitedRun.status, 1);
+    const limitedGrade = JSON.parse(readFileSync(path.join(limitedDir, 'demo/eval-a/new_skill/run-1/grading.json'), 'utf8'));
+    assert.equal(limitedGrade.execution_metrics.failure_mode, 'crash');
+    assert.equal(limitedGrade.execution_metrics.error, 'Assistant reached its output token limit');
+    assert.equal(limitedGrade.execution_metrics.diagnostics.messages[0].stopReason, 'length');
+    assert.equal(limitedGrade.execution_metrics.diagnostics.messages[0].usage.output, 512);
+    assert.equal(limitedGrade.execution_metrics.judge_diagnostics, undefined);
+    assert.equal(limitedGrade.summary.pass_rate, 0);
+    assert.match(readFileSync(path.join(limitedDir, 'demo/eval-a/new_skill/run-1/outputs/response.md'), 'utf8'), /needle-a/);
+
     for (const [failure, expected] of [
       ['exit', 'Semantic judge: Pi exited with code 7'],
       ['json', 'judge returned invalid JSON'],
@@ -375,6 +454,30 @@ if (mode === 'text') {
         .map((file) => readFileSync(path.join(diagnosticsDir, file), 'utf8')).join('\n');
       assert.ok(artifacts.includes(expected), artifacts);
       assert.doesNotMatch(artifacts, /sensitive-provider-body/);
+    }
+
+    for (const negative of [false, true]) {
+      const repairDir = path.join(root, negative ? 'valid-negative' : 'repaired-judge');
+      const callLog = path.join(root, negative ? 'negative-calls' : 'repair-calls');
+      const repairedRun = spawnSync(process.execPath, [script], {
+        cwd: root, encoding: 'utf8',
+        env: { ...gitEnv, PATH: `${bin}:${gitEnv.PATH}`,
+          FAKE_JUDGE_REPAIR: negative ? '0' : '1', FAKE_JUDGE_NEGATIVE: negative ? '1' : '0',
+          FAKE_PI_CALL_LOG: callLog, SKILL_EVAL_BASE_SHA: base, SKILL_EVAL_HEAD_SHA: head,
+          SKILL_EVAL_OUTPUT_DIR: repairDir, SKILL_EVAL_RUNS: '1' },
+      });
+      assert.equal(repairedRun.status, negative ? 1 : 0, repairedRun.stderr);
+      const calls = readFileSync(callLog, 'utf8').trim().split('\n');
+      assert.equal(calls.filter((call) => call === 'task').length, 7);
+      assert.equal(calls.filter((call) => call === 'judge').length, negative ? 7 : 14);
+      const grade = JSON.parse(readFileSync(path.join(repairDir, 'demo/eval-a/new_skill/run-1/grading.json'), 'utf8'));
+      assert.equal(grade.execution_metrics.judge_attempts.length, negative ? 1 : 2);
+      assert.equal(grade.summary.pass_rate, negative ? 0 : 1);
+      assert.doesNotMatch(JSON.stringify(grade), /sensitive-provider-body/);
+      if (!negative) {
+        assert.equal(grade.execution_metrics.judge_attempts[0].error, 'judge verdict requires grounded evidence');
+        assert.equal(grade.execution_metrics.judge_attempts[0].expectationIndex, 0);
+      }
     }
 
     writeFileSync(
