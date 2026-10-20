@@ -34,6 +34,7 @@ describe('runtime compatibility', () => {
     '0.84.2',
     '1.0.4',
     '1.2.0',
+    '1.3.0',
   ])('finishes prompts on the supported boundary for Pi %s', async (version) => {
     runtime.version = version;
     const handlers = new Map<string, (...args: any[]) => unknown>();
