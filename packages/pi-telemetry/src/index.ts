@@ -7,7 +7,7 @@ import type {
 
 export type RuntimeLlmStreamEvent = Omit<
   RuntimeLlmGenerationEvent,
-  'status' | 'model' | 'input' | 'output' | 'usage' | 'responseId' | 'stopReason' | 'error'
+  'status' | 'model' | 'output' | 'usage' | 'responseId' | 'stopReason' | 'error'
 > & {
   streamEvents: JsonValue[];
   error?: string;

@@ -102,6 +102,52 @@ export function toTelemetryValue(
   return result;
 }
 
+// Prefer protocol messages to context snapshots, which may predate prompt projection.
+export function providerDisplayInput(payload: unknown): JsonObject[] | undefined {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined;
+  const request = payload as Record<string, unknown>;
+  let messages: unknown[];
+  if (Array.isArray(request.messages)) {
+    messages = [
+      ...(request.system !== undefined ? [{ role: 'system', content: request.system }] : []),
+      ...request.messages,
+    ];
+  } else if (Array.isArray(request.input) || typeof request.input === 'string') {
+    messages = [
+      ...(typeof request.instructions === 'string'
+        ? [{ role: 'system', content: request.instructions }]
+        : []),
+      ...(Array.isArray(request.input)
+        ? request.input
+        : [{ role: 'user', content: request.input }]),
+    ];
+  } else if (Array.isArray(request.contents)) {
+    if (
+      request.contents.some(
+        (message) => !message || typeof message !== 'object' || Array.isArray(message),
+      )
+    )
+      return undefined;
+    const config = request.config as Record<string, unknown> | undefined;
+    const system = request.systemInstruction ?? config?.systemInstruction;
+    messages = [
+      ...(system !== undefined ? [{ role: 'system', content: system }] : []),
+      ...request.contents.map(({ parts, ...message }) => ({
+        ...message,
+        role: message.role === 'model' ? 'assistant' : message.role,
+        content: parts,
+      })),
+    ];
+  } else return undefined;
+  if (messages.some((message) => !message || typeof message !== 'object' || Array.isArray(message)))
+    return undefined;
+  const result = toTelemetryValue(messages) as JsonObject[];
+  const tools = request.tools ?? (request.config as Record<string, unknown> | undefined)?.tools;
+  if (tools !== undefined && result[0])
+    result[0] = { ...result[0], tools: toTelemetryValue(tools) };
+  return result;
+}
+
 export function isInlineImage(mime: string, data: string): boolean {
   return (
     /^image\/(png|jpeg|webp|gif)$/.test(mime) &&

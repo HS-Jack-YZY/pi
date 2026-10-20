@@ -172,6 +172,7 @@ export function applyTelemetryRedaction(
 export function stripTelemetryPayloads(event: RuntimeTelemetryEvent): RuntimeTelemetryEvent {
   if (isLlmStreamEvent(event)) {
     const {
+      input: _input,
       streamEvents: _streamEvents,
       displayInput: _displayInput,
       displayOutput: _displayOutput,

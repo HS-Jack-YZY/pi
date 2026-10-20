@@ -481,6 +481,7 @@ export class OtelRuntimeEventExporter implements RuntimeEventExporter {
           ...lineageMetadata(event),
           llmGenerationId: event.llmGenerationId,
           ...langfuseObservationAttributes({
+            input: event.input,
             output: event.streamEvents,
             level: 'DEFAULT',
           }),
