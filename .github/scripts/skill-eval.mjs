@@ -133,7 +133,7 @@ export function gradeExpectations(answer, expectations, verdictText) {
     if (!verdict || typeof verdict.passed !== 'boolean' || typeof verdict.evidence !== 'string' ||
         !verdict.evidence.trim() || verdict.evidence.length > 2000 ||
         (verdict.passed && !answer.includes(verdict.evidence))) {
-      throw new Error('judge verdict requires grounded evidence');
+      throw Object.assign(new Error('judge verdict requires grounded evidence'), { expectationIndex: i });
     }
     return { text: expectation.text, passed: verdict.passed, evidence: verdict.evidence };
   });
@@ -161,16 +161,31 @@ export function gradeTrace(calls, expectations) {
 export function parsePiEvents(stdout) {
   const calls = new Map();
   const answers = [];
+  const diagnostics = { answerChars: 0, messages: [] };
   for (const line of stdout.split('\n').filter(Boolean)) {
     const event = JSON.parse(line);
     if (event.type === 'tool_execution_start') calls.set(event.toolCallId, { name: event.toolName, args: event.args, isError: true });
     if (event.type === 'tool_execution_end' && calls.has(event.toolCallId)) calls.get(event.toolCallId).isError = event.isError === true;
     if (event.type === 'message_end' && event.message?.role === 'assistant') {
-      if (['error', 'aborted'].includes(event.message.stopReason)) throw new Error('Assistant did not complete');
+      const { stopReason, usage } = event.message;
+      diagnostics.messages.push({
+        stopReason: ['stop', 'toolUse', 'length', 'error', 'aborted', 'pending'].includes(stopReason) ? stopReason : 'unknown',
+        usage: Object.fromEntries(['input', 'output', 'cacheRead', 'cacheWrite', 'totalTokens']
+          .filter((key) => Number.isFinite(usage?.[key]) && usage[key] >= 0)
+          .map((key) => [key, usage[key]])),
+      });
       answers.push(...(event.message.content ?? []).filter((item) => item.type === 'text').map((item) => item.text));
     }
   }
-  return { answer: answers.join('\n').slice(0, 20_000), calls: [...calls.values()] };
+  const answer = answers.join('\n');
+  diagnostics.answerChars = answer.length;
+  let failure = '';
+  if (diagnostics.messages.some((message) => message.stopReason === 'length')) failure = 'Assistant reached its output token limit';
+  else if (diagnostics.messages.some((message) => ['error', 'aborted'].includes(message.stopReason))) failure = 'Assistant did not complete';
+  else if (diagnostics.messages.at(-1)?.stopReason !== 'stop') failure = 'Assistant did not finish with a completed response';
+  else if (answer.length > 20_000) failure = 'Pi answer exceeded the 20000-character evaluation limit';
+  if (failure) throw Object.assign(new Error(failure), { diagnostics, answer: answer.slice(0, 20_000), calls: [...calls.values()] });
+  return { answer, calls: [...calls.values()], diagnostics };
 }
 
 const mean = (values) => values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -338,7 +353,7 @@ export function runPi({ cwd, skillDir, prompt, timeoutMs, mode = 'text', scenari
     ];
     if (!judge) args.push('-e', fileURLToPath(new URL('./skill-eval-tools.mjs', import.meta.url)));
     if (skillDir) args.push(mode === 'tools' ? '--skill' : '--append-system-prompt', path.join(skillDir, 'SKILL.md'));
-    args.push('--mode', judge ? 'text' : 'json', '-p', prompt);
+    args.push('--mode', 'json', '-p', prompt);
 
     const child = spawn('pi', args, { cwd, env: { ...process.env, SKILL_EVAL_SKILL_DIR: skillDir ?? '', SKILL_EVAL_MODE: mode, SKILL_EVAL_SCENARIO: scenario ?? '' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
@@ -350,19 +365,16 @@ export function runPi({ cwd, skillDir, prompt, timeoutMs, mode = 'text', scenari
       if (event.type === 'tool_execution_start') stdout += `${JSON.stringify({ type: event.type, toolCallId: event.toolCallId, toolName: event.toolName, args: event.args })}\n`;
       if (event.type === 'tool_execution_end') stdout += `${JSON.stringify({ type: event.type, toolCallId: event.toolCallId, isError: event.isError })}\n`;
       if (event.type === 'message_end' && event.message?.role === 'assistant') {
-        stdout += `${JSON.stringify({ type: event.type, message: { role: 'assistant', stopReason: event.message.stopReason, content: event.message.content?.filter((item) => item.type === 'text') } })}\n`;
+        stdout += `${JSON.stringify({ type: event.type, message: { role: 'assistant', stopReason: event.message.stopReason, usage: event.message.usage, content: event.message.content?.filter((item) => item.type === 'text') } })}\n`;
       }
     };
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
-      if (judge) stdout += chunk;
-      else {
-        pending += chunk;
-        const lines = pending.split('\n');
-        pending = lines.pop();
-        try { for (const line of lines.filter(Boolean)) keepLine(line); }
-        catch { killedForSize = true; child.kill('SIGKILL'); }
-      }
+      pending += chunk;
+      const lines = pending.split('\n');
+      pending = lines.pop();
+      try { for (const line of lines.filter(Boolean)) keepLine(line); }
+      catch { killedForSize = true; child.kill('SIGKILL'); }
       // Bound retained results, not repeated streaming message_update snapshots.
       if (Buffer.byteLength(stdout) > 256 * 1024 || Buffer.byteLength(pending) > 256 * 1024) {
         killedForSize = true;
@@ -377,15 +389,20 @@ export function runPi({ cwd, skillDir, prompt, timeoutMs, mode = 'text', scenari
     child.on('close', (code, signal) => {
       clearTimeout(timer);
       let parsed = { answer: '', calls: [] };
+      let parseFailure = '';
       try {
-        if (!judge && pending.trim()) keepLine(pending);
-        parsed = judge ? { answer: stdout.trim().slice(0, 20_000), calls: [] } : parsePiEvents(stdout); }
-      catch { /* Invalid/truncated JSON is a failed run, never partial success. */ }
+        if (pending.trim()) keepLine(pending);
+        parsed = parsePiEvents(stdout);
+      } catch (error) {
+        parseFailure = error.diagnostics ? error.message : 'Pi returned invalid or incomplete events';
+        if (error.diagnostics) parsed = { answer: error.answer, calls: error.calls, diagnostics: error.diagnostics };
+      }
       const { answer } = parsed;
       const failure =
-        killedForSize ? 'Pi output exceeded limits or contained invalid events' : signal === 'SIGKILL' ? `Pi timed out after ${timeoutMs}ms` : code !== 0 ? `Pi exited with code ${code}` : !answer ? 'Pi returned no assistant text' : '';
+        killedForSize ? 'Pi output exceeded limits or contained invalid events' : signal === 'SIGKILL' ? `Pi timed out after ${timeoutMs}ms` : code !== 0 ? `Pi exited with code ${code}` : parseFailure || (!answer ? 'Pi returned no assistant text' : '');
       resolve({
         ...parsed,
+        diagnostics: { ...parsed.diagnostics, exitCode: code, signal },
         failure_mode: failure ? 'crash' : 'ok',
         ...(failure ? { error: failure } : {}),
         duration_ms: Date.now() - started,
@@ -426,7 +443,14 @@ function writeRun(workspace, evalItem, configuration, runNumber, run) {
           total: run.grading.total,
           pass_rate: run.grading.score,
         },
-        execution_metrics: { errors_encountered: run.failure_mode === 'ok' ? 0 : 1 },
+        execution_metrics: {
+          errors_encountered: run.failure_mode === 'ok' ? 0 : 1,
+          failure_mode: run.failure_mode,
+          error: run.error,
+          diagnostics: run.diagnostics,
+          judge_diagnostics: run.judge_diagnostics,
+          judge_attempts: run.judge_attempts,
+        },
         timing: { total_duration_seconds: run.duration_ms / 1000 },
       },
       null,
@@ -497,6 +521,9 @@ function buildBenchmark({ skill, skillPath, type, runs, runCount, gate, baseEval
         time_seconds: run.duration_ms / 1000,
         tool_calls: run.calls?.length ?? 0,
         errors: run.failure_mode === 'ok' ? 0 : 1,
+        diagnostics: run.diagnostics,
+        judge_diagnostics: run.judge_diagnostics,
+        judge_attempts: run.judge_attempts,
       },
       expectations: run.grading.expectations,
       notes: run.error ? [run.error] : [],
@@ -550,23 +577,44 @@ async function evaluateSkill({ change, base, head, tempRoot, outputRoot, cwd, ru
         if (!result) continue;
         let grading;
         if (result.failure_mode === 'ok') {
+          const safeErrors = ['judge returned invalid JSON', 'judge verdict count must match expectations', 'judge verdict requires grounded evidence'];
           try {
             if (evalItem.mode === 'tools') grading = gradeTrace(result.calls, evalItem.expectations);
             else {
-              const verdict = await runPi({ cwd, timeoutMs, judge: true, prompt: JSON.stringify({
-                request: evalItem.prompt, expected_output: evalItem.expected_output,
-                requirements: evalItem.expectations, answer: result.answer,
-              }) });
-              if (verdict.failure_mode !== 'ok') {
-                result.error = `Semantic judge: ${verdict.error}`;
-                throw new Error('judge failed');
+              let gradingFeedback;
+              result.judge_attempts = [];
+              for (let attempt = 0; attempt < 2; attempt++) {
+                const verdict = await runPi({ cwd, timeoutMs, judge: true, prompt: JSON.stringify({
+                  request: evalItem.prompt, expected_output: evalItem.expected_output,
+                  requirements: evalItem.expectations, answer: result.answer,
+                  grading_feedback: gradingFeedback,
+                }) });
+                result.judge_diagnostics = verdict.diagnostics;
+                const diagnostics = { diagnostics: verdict.diagnostics };
+                result.judge_attempts.push(diagnostics);
+                if (verdict.failure_mode !== 'ok') {
+                  result.error = `Semantic judge: ${verdict.error}`;
+                  diagnostics.error = result.error;
+                  throw new Error('judge failed');
+                }
+                try {
+                  grading = gradeExpectations(result.answer, evalItem.expectations, verdict.answer);
+                  break;
+                } catch (error) {
+                  if (!safeErrors.includes(error?.message)) throw error;
+                  diagnostics.error = error.message;
+                  diagnostics.expectationIndex = error.expectationIndex;
+                  if (attempt === 1) throw error;
+                  gradingFeedback = {
+                    error: error.message, expectationIndex: error.expectationIndex,
+                    instruction: 'Correct only the invalid grading response for the same answer. Return one verdict per requirement. For each passed verdict, use a short exact contiguous substring of answer as evidence; preserve its characters and whitespace without paraphrasing or ellipses. Assess every requirement on its merits; do not change criteria or invent evidence to pass validation.',
+                  };
+                }
               }
-              grading = gradeExpectations(result.answer, evalItem.expectations, verdict.answer);
             }
           } catch (error) {
             result.failure_mode = 'crash';
             // Only expose fixed diagnostics, never raw parser errors or judge output.
-            const safeErrors = ['judge returned invalid JSON', 'judge verdict count must match expectations', 'judge verdict requires grounded evidence'];
             result.error ??= safeErrors.includes(error?.message) ? error.message : 'Unexpected grading failure';
           }
         }
