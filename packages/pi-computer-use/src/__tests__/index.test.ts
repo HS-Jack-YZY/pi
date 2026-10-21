@@ -337,6 +337,7 @@ describe('computerUseExtension', () => {
   it.each([
     'browser_click',
     'browser_type',
+    'browser_select',
     'browser_navigate',
     'browser_pointer',
     'browser_set_input_files',
@@ -1303,6 +1304,22 @@ describe('computerUseExtension', () => {
     expect(result.content[0].text).toContain('requires interactive user confirmation');
   });
 
+  it('keeps upstream recovery guidance when translating permission errors', async () => {
+    await start();
+    mockCallTool = () => ({
+      isError: true,
+      content: [{ type: 'text', text: 'ax_not_granted' }],
+      structuredContent: { hint: 'Grant Accessibility, then inspect permissions again.' },
+    });
+    const result = (await tools
+      .get('computer_use_check_permissions')!
+      .execute('id', { prompt: false }, undefined, undefined, mockCtx)) as any;
+    expect(result.isError).toBe(true);
+    expect(result.content.map((c: { text: string }) => c.text).join('\n')).toContain(
+      'Grant Accessibility, then inspect permissions again.',
+    );
+  });
+
   it('uses get_window_state for optional vision analysis', async () => {
     let call: { name: string; args: Record<string, unknown> } | undefined;
     await start({ visionModel: { provider: 'openai', model: 'gpt-4o' } });
@@ -1439,6 +1456,7 @@ describe('computerUseExtension', () => {
       const active = mockPi.getActiveTools();
       expect(active).toContain('computer_use_browser_click');
       expect(active).toContain('computer_use_browser_navigate');
+      expect(active).toContain('computer_use_browser_select');
       expect(active).not.toContain('computer_use_start_recording');
     });
 
@@ -1452,11 +1470,13 @@ describe('computerUseExtension', () => {
 
     it('activates optional extensions and visual parsing through diagnostics', async () => {
       await start();
+      expect(mockPi.getActiveTools()).not.toContain('computer_use_get_guide');
       expect(mockPi.getActiveTools()).not.toContain('computer_use_parse_visual_regions');
       expect(mockPi.getActiveTools()).not.toContain('computer_use_install_extension');
 
       await commands.get('computer-use-tools')!.handler('diagnostics', mockCtx);
 
+      expect(mockPi.getActiveTools()).toContain('computer_use_get_guide');
       expect(mockPi.getActiveTools()).toContain('computer_use_parse_visual_regions');
       expect(mockPi.getActiveTools()).toContain('computer_use_install_extension');
     });
