@@ -68,6 +68,37 @@ describe('toPiToolResult', () => {
   });
 
   describe('model-visible enrichment', () => {
+    it('includes recovery guidance only once when enriching all structured fields', () => {
+      const result = toPiToolResult(
+        { structuredContent: { hint: 'Read the window again.' } },
+        'verify_state',
+      );
+      const text = result.content.map((c) => ('text' in c ? c.text : '')).join('\n');
+      expect(text.match(/Read the window again\./g)).toHaveLength(1);
+    });
+
+    it.each([false, true])('exposes upstream recovery guidance with isError=%s', (isError) => {
+      const result = toPiToolResult(
+        {
+          content: [{ type: 'text', text: 'Action could not be confirmed.' }],
+          structuredContent: {
+            hint: 'Read the page before repeating the action.',
+            next_call: {
+              tool: 'get_browser_state',
+              arguments: { target_id: 'bt-123', tab_id: 'tab-456' },
+            },
+          },
+          isError,
+        },
+        'browser_select',
+      );
+      const text = result.content.map((c) => ('text' in c ? c.text : '')).join('\n');
+      expect(text).toContain('Read the page before repeating the action.');
+      expect(text).toContain('get_browser_state');
+      expect(text).toContain('bt-123');
+      expect(text).toContain('tab-456');
+    });
+
     it.each([
       {
         snapshot_id: 'p7',
@@ -510,7 +541,7 @@ describe('toPiToolResult', () => {
       expect(text.match(/snapshot_id=s00000009/g)?.length).toBe(1);
     });
 
-    it('surfaces degraded_reason with a recovery hint', () => {
+    it('surfaces degraded_reason without guessing a foreground recovery', () => {
       const result = toPiToolResult(
         {
           content: [{ type: 'text', text: 'window_id=7825 pid=9229 elements=0\n' }],
@@ -523,8 +554,23 @@ describe('toPiToolResult', () => {
       );
       const text = result.content.map((c) => ('text' in c ? c.text : '')).join('\n');
       expect(text).toContain('off_space_or_ax_unresolved');
-      expect(text).toContain('bring_to_front');
+      expect(text).toContain('get_guide');
+      expect(text).not.toContain('bring_to_front');
       expect(text).not.toContain('delivery_mode');
+    });
+
+    it('does not suggest foreground actions when the screen is locked', () => {
+      const result = toPiToolResult(
+        {
+          content: [{ type: 'text', text: 'window_id=7825 pid=9229 elements=0' }],
+          structuredContent: { degraded: true, degraded_reason: 'screen_locked' },
+        },
+        'get_window_state',
+      );
+      const text = result.content.map((c) => ('text' in c ? c.text : '')).join('\n');
+      expect(text).toContain('screen_locked');
+      expect(text).toContain('wake and unlock');
+      expect(text).not.toContain('bring_to_front');
     });
 
     it('hints max_elements when the tree is absent from text but elements exist', () => {

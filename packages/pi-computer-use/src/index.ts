@@ -473,11 +473,10 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
               const errorText = result.content?.map((c) => c.text ?? '').join('') ?? '';
               const friendlyError = formatToolError(originalName, errorText, params);
               if (friendlyError) {
-                return {
-                  content: [{ type: 'text' as const, text: friendlyError }],
-                  details: undefined,
-                  isError: true,
-                };
+                return toPiToolResult(
+                  { ...result, content: [{ type: 'text', text: friendlyError }] },
+                  originalName,
+                );
               }
             }
 

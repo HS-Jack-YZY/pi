@@ -295,7 +295,7 @@ function buildEnrichment(toolName: string, result: McpToolResult): string | unde
     originalText.split('\n').length < ENRICHMENT_MAX_LINES
       ? originalText
       : '';
-  const parts: string[] = [];
+  const parts = structuredFieldLines({ hint: sc.hint, next_call: sc.next_call }, existingText);
 
   if (!result.isError) {
     switch (toolName) {
@@ -363,7 +363,7 @@ function buildEnrichment(toolName: string, result: McpToolResult): string | unde
       case 'get_config':
       case 'get_agent_cursor_state':
       case 'verify_state':
-        parts.push(...structuredFieldLines(sc, existingText));
+        parts.push(...structuredFieldLines(sc, `${existingText}\n${parts.join('\n')}`));
         break;
     }
   }
@@ -422,9 +422,11 @@ function buildEnrichment(toolName: string, result: McpToolResult): string | unde
     if (sc.degraded === true || typeof sc.degraded_reason === 'string') {
       const reason = typeof sc.degraded_reason === 'string' ? sc.degraded_reason : 'unknown';
       if (!existingText.includes(`degraded_reason=${reason}`)) {
-        parts.push(
-          `degraded_reason=${reason} - activate the window onto the current Space first (e.g. bring_to_front), then retry`,
-        );
+        const hint =
+          reason === 'screen_locked'
+            ? 'wake and unlock the Mac, then retry; do not send foreground input to the lock screen'
+            : 'consult the tool description or get_guide for recovery before retrying';
+        parts.push(`degraded_reason=${reason} - ${hint}`);
       }
     }
     const elementCount = typeof sc.element_count === 'number' ? sc.element_count : undefined;

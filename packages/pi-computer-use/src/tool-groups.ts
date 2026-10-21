@@ -41,6 +41,7 @@ export const TOOL_GROUPS: Readonly<Record<string, ToolGroup>> = {
       'browser_navigate',
       'browser_click',
       'browser_type',
+      'browser_select',
       'browser_dialog',
       'browser_set_input_files',
       'browser_download',
@@ -91,6 +92,7 @@ export const TOOL_GROUPS: Readonly<Record<string, ToolGroup>> = {
   diagnostics: {
     summary: 'Permissions, health, driver config, display info, visual parsing and extensions',
     tools: [
+      'get_guide',
       'check_permissions',
       'health_report',
       'get_config',

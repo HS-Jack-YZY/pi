@@ -1,8 +1,8 @@
 # Cua Driver runtime
 
-This package redistributes the signed `CuaDriver.app` from Cua Driver Rust 0.35.4 without modification.
+This package redistributes the signed `CuaDriver.app` from Cua Driver Rust 0.37.0 without modification.
 
-- Release: https://github.com/trycua/cua/releases/tag/cua-driver-rs-v0.35.4
-- Asset: `cua-driver-rs-0.35.4-darwin-universal.tar.gz`
-- SHA256: `97d5ea2fd446331947c717c433d4cf5aae063f4824e1ba24303c4696184ec52e`
+- Release: https://github.com/trycua/cua/releases/tag/cua-driver-rs-v0.37.0
+- Asset: `cua-driver-rs-0.37.0-darwin-universal.tar.gz`
+- SHA256: `313847b3abd53658fcc8bb4d1f89c3540eed7cafc760685d7b522ba1127878b1`
 - Upstream license: MIT; see `LICENSE.md`
