@@ -305,6 +305,30 @@ describe('task scheduler', () => {
     });
   });
 
+  it('does not replay missed intervals after a forward clock adjustment', async () => {
+    await withFakeClock(async (now) => {
+      const runs: number[] = [];
+      const scheduler = await startedScheduler(runs, {
+        type: 'interval',
+        schedule: '30d',
+        intervalSeconds: thirtyDaysMs / 1000,
+      });
+      try {
+        vi.setSystemTime(now + 3 * thirtyDaysMs);
+        await vi.advanceTimersByTimeAsync(maxTimerDelayMs + 10);
+        expect(runs).toHaveLength(1);
+        const nextRunAt = Date.parse((await scheduler.list())[0]?.nextRunAt ?? '');
+        await vi.advanceTimersByTimeAsync(nextRunAt - Date.now() - 1);
+        expect(runs).toHaveLength(1);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(runs).toHaveLength(2);
+        expect(runs[1]! - runs[0]!).toBe(thirtyDaysMs);
+      } finally {
+        await scheduler.stop();
+      }
+    });
+  });
+
   it('leaves a cron task a year away to croner, which waits in short steps', async () => {
     await withFakeClock(async (now) => {
       const runs: number[] = [];

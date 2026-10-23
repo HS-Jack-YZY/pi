@@ -422,7 +422,7 @@ export class PersistentTaskScheduler implements TaskScheduler {
     if (intervalMs > MAX_TIMER_DELAY_MS) {
       const runAt = (at: number): void => {
         this.setTimerAt(task.id, at, () => {
-          runAt(at + intervalMs);
+          runAt(Date.now() + intervalMs);
           void this.execute(task.id);
         });
       };
